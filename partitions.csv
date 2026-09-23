@@ -1,0 +1,7 @@
+# Name,   Type, SubType, Offset,   Size
+# XIAO ESP32-C6 ships with 4 MB flash (source/sdkconfig.defaults in the
+# original C++ firmware: CONFIG_ESPTOOLPY_FLASHSIZE_4MB). No OTA slots here
+# (out of scope for v1), so the app partition takes the rest of the flash.
+nvs,      data, nvs,     0x9000,   0x6000
+calib,    data, fat,     0xF000,   0x4000
+factory,  app,  factory, 0x20000,  0x3E0000
