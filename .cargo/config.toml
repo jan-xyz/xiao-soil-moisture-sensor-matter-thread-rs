@@ -1,0 +1,18 @@
+[build]
+target = "riscv32imac-unknown-none-elf"
+
+[target.'cfg(all(target_arch = "riscv32", target_os = "none"))']
+runner = "espflash flash --monitor"
+rustflags = [
+  "-C", "link-arg=-Tlinkall.x",
+  "-C", "force-frame-pointers",
+  "--cfg", "sha2_backend_soft=\"compact\"",
+  "--cfg", "aes_backend_soft=\"compact\"",
+]
+
+[unstable]
+build-std = ["core", "alloc", "panic_abort"]
+
+[env]
+DEFMT_LOG = "info"
+ESP_LOG = "info"
