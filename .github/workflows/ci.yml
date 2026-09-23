@@ -12,14 +12,14 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup show
       - run: cargo fmt --check
 
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
       - run: make build
@@ -27,7 +27,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
       - run: make lint
@@ -35,7 +35,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
       - run: make test
