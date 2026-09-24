@@ -3602,7 +3602,7 @@ dependencies = [
  "rand_core 0.9.5",
  "rs-matter-stack",
  "scopeguard",
- "sequential-storage",
+ "sequential-storage 3.0.1",
  "static_cell",
  "trouble-host",
 ]
@@ -3761,6 +3761,15 @@ name = "sequential-storage"
 version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b80693b2169b3fe0f9c68d5fae804490cc437113c0526dbabb75c01e758db597"
+dependencies = [
+ "embedded-storage-async",
+]
+
+[[package]]
+name = "sequential-storage"
+version = "8.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e750f14f4f6e5a81277c66311713a56106c8df0196df62a634d1fc806556832b"
 dependencies = [
  "embedded-storage-async",
 ]
@@ -4770,7 +4779,7 @@ dependencies = [
  "log",
  "portable-atomic",
  "rs-matter-embassy",
- "sequential-storage",
+ "sequential-storage 8.0.1",
  "static_cell",
  "tinyrlibc",
 ]
