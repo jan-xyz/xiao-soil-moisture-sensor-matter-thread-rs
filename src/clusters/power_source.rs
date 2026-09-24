@@ -19,10 +19,14 @@ use core::cell::RefCell;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
-use rs_matter_embassy::matter::dm::{ArrayAttributeRead, Cluster, Dataver, HandlerContext, ReadContext};
+use rs_matter_embassy::matter::dm::{
+    ArrayAttributeRead, Cluster, Dataver, HandlerContext, ReadContext,
+};
 use rs_matter_embassy::matter::error::Error;
 use rs_matter_embassy::matter::im::EndptId;
-use rs_matter_embassy::matter::tlv::{Nullable, TLVBuilderParent, ToTLVArrayBuilder, ToTLVBuilder, Utf8StrBuilder};
+use rs_matter_embassy::matter::tlv::{
+    Nullable, TLVBuilderParent, ToTLVArrayBuilder, ToTLVBuilder, Utf8StrBuilder,
+};
 use rs_matter_embassy::matter::utils::sync::Signal;
 use rs_matter_embassy::matter::with;
 
@@ -57,18 +61,29 @@ pub struct BatteryCell(Mutex<CriticalSectionRawMutex, RefCell<Reading>>);
 
 impl BatteryCell {
     pub const fn new() -> Self {
-        Self(Mutex::new(RefCell::new(Reading { percent: None, rest_mv: None })))
+        Self(Mutex::new(RefCell::new(Reading {
+            percent: None,
+            rest_mv: None,
+        })))
     }
 
     fn get(&self) -> Reading {
         self.0.lock(|cell| {
             let reading = cell.borrow();
-            Reading { percent: reading.percent, rest_mv: reading.rest_mv }
+            Reading {
+                percent: reading.percent,
+                rest_mv: reading.rest_mv,
+            }
         })
     }
 
     fn set(&self, percent: u8, rest_mv: u32) {
-        self.0.lock(|cell| *cell.borrow_mut() = Reading { percent: Some(percent), rest_mv: Some(rest_mv) });
+        self.0.lock(|cell| {
+            *cell.borrow_mut() = Reading {
+                percent: Some(percent),
+                rest_mv: Some(rest_mv),
+            }
+        });
     }
 }
 
@@ -91,7 +106,12 @@ pub struct PowerSourceHandler<'a> {
 
 impl<'a> PowerSourceHandler<'a> {
     pub const fn new(endpoint_id: EndptId, dataver: Dataver, reading: &'a BatteryCell) -> Self {
-        Self { endpoint_id, dataver, reading, changed: Signal::new(None) }
+        Self {
+            endpoint_id,
+            dataver,
+            reading,
+            changed: Signal::new(None),
+        }
     }
 
     /// Called by the sampling loop with a freshly measured resting voltage
@@ -130,8 +150,16 @@ impl ClusterHandler for PowerSourceHandler<'_> {
     async fn run(&self, ctx: impl HandlerContext) -> Result<(), Error> {
         loop {
             self.changed.wait_signalled().await;
-            ctx.notify_attr_changed(self.endpoint_id, Self::CLUSTER.id, AttributeId::BatPercentRemaining as _);
-            ctx.notify_attr_changed(self.endpoint_id, Self::CLUSTER.id, AttributeId::BatVoltage as _);
+            ctx.notify_attr_changed(
+                self.endpoint_id,
+                Self::CLUSTER.id,
+                AttributeId::BatPercentRemaining as _,
+            );
+            ctx.notify_attr_changed(
+                self.endpoint_id,
+                Self::CLUSTER.id,
+                AttributeId::BatVoltage as _,
+            );
         }
     }
 
@@ -143,7 +171,11 @@ impl ClusterHandler for PowerSourceHandler<'_> {
         Ok(0)
     }
 
-    fn description<P: TLVBuilderParent>(&self, _ctx: impl ReadContext, out: Utf8StrBuilder<P>) -> Result<P, Error> {
+    fn description<P: TLVBuilderParent>(
+        &self,
+        _ctx: impl ReadContext,
+        out: Utf8StrBuilder<P>,
+    ) -> Result<P, Error> {
         out.set("AA Battery")
     }
 
@@ -180,14 +212,20 @@ impl ClusterHandler for PowerSourceHandler<'_> {
 
     fn bat_charge_level(&self, _ctx: impl ReadContext) -> Result<BatChargeLevelEnum, Error> {
         Ok(match self.reading.get().percent {
-            Some(percent) if percent < CHARGE_LEVEL_CRITICAL_BELOW_PERCENT => BatChargeLevelEnum::Critical,
-            Some(percent) if percent < CHARGE_LEVEL_WARNING_BELOW_PERCENT => BatChargeLevelEnum::Warning,
+            Some(percent) if percent < CHARGE_LEVEL_CRITICAL_BELOW_PERCENT => {
+                BatChargeLevelEnum::Critical
+            }
+            Some(percent) if percent < CHARGE_LEVEL_WARNING_BELOW_PERCENT => {
+                BatChargeLevelEnum::Warning
+            }
             _ => BatChargeLevelEnum::OK,
         })
     }
 
     fn bat_replacement_needed(&self, _ctx: impl ReadContext) -> Result<bool, Error> {
-        Ok(matches!(self.reading.get().percent, Some(percent) if percent < CHARGE_LEVEL_CRITICAL_BELOW_PERCENT))
+        Ok(
+            matches!(self.reading.get().percent, Some(percent) if percent < CHARGE_LEVEL_CRITICAL_BELOW_PERCENT),
+        )
     }
 
     fn bat_replaceability(&self, _ctx: impl ReadContext) -> Result<BatReplaceabilityEnum, Error> {

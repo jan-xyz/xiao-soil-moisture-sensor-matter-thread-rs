@@ -11,7 +11,9 @@ use core::cell::RefCell;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
-use rs_matter_embassy::matter::dm::clusters::decl::globals::{MeasurementAccuracyStructBuilder, MeasurementTypeEnum};
+use rs_matter_embassy::matter::dm::clusters::decl::globals::{
+    MeasurementAccuracyStructBuilder, MeasurementTypeEnum,
+};
 use rs_matter_embassy::matter::dm::{Dataver, HandlerContext, ReadContext};
 use rs_matter_embassy::matter::error::Error;
 use rs_matter_embassy::matter::im::{EndptId, Percent};
@@ -64,7 +66,12 @@ pub struct SoilMeasurementHandler<'a> {
 
 impl<'a> SoilMeasurementHandler<'a> {
     pub const fn new(endpoint_id: EndptId, dataver: Dataver, value: &'a SoilMoistureCell) -> Self {
-        Self { endpoint_id, dataver, value, changed: Signal::new(None) }
+        Self {
+            endpoint_id,
+            dataver,
+            value,
+            changed: Signal::new(None),
+        }
     }
 
     /// Called by the sampling loop with a freshly measured percent. Only
@@ -102,7 +109,11 @@ impl ClusterHandler for SoilMeasurementHandler<'_> {
     async fn run(&self, ctx: impl HandlerContext) -> Result<(), Error> {
         loop {
             self.changed.wait_signalled().await;
-            ctx.notify_attr_changed(self.endpoint_id, Self::CLUSTER.id, AttributeId::SoilMoistureMeasuredValue as _);
+            ctx.notify_attr_changed(
+                self.endpoint_id,
+                Self::CLUSTER.id,
+                AttributeId::SoilMoistureMeasuredValue as _,
+            );
         }
     }
 
@@ -134,7 +145,10 @@ impl ClusterHandler for SoilMeasurementHandler<'_> {
             .end() // closes the outer struct, back to P
     }
 
-    fn soil_moisture_measured_value(&self, _ctx: impl ReadContext) -> Result<Nullable<Percent>, Error> {
+    fn soil_moisture_measured_value(
+        &self,
+        _ctx: impl ReadContext,
+    ) -> Result<Nullable<Percent>, Error> {
         Ok(match self.value.get() {
             Some(percent) => Nullable::some(percent),
             None => Nullable::none(),

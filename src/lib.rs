@@ -89,7 +89,14 @@ mod tests {
             },
         ];
 
-        for SoilTestCase { name, input_mv, input_dry_mv, input_wet_mv, expected } in test_cases {
+        for SoilTestCase {
+            name,
+            input_mv,
+            input_dry_mv,
+            input_wet_mv,
+            expected,
+        } in test_cases
+        {
             let result = soil_moisture_percent(input_mv, input_dry_mv, input_wet_mv);
             assert_eq!(result, expected, "Failed case: '{name}'");
         }
@@ -150,7 +157,14 @@ mod tests {
             },
         ];
 
-        for BatteryTestCase { name, input_mv, input_empty_mv, input_full_mv, expected } in test_cases {
+        for BatteryTestCase {
+            name,
+            input_mv,
+            input_empty_mv,
+            input_full_mv,
+            expected,
+        } in test_cases
+        {
             let result = battery_percent(input_mv, input_empty_mv, input_full_mv);
             assert_eq!(result, expected, "Failed case: '{name}'");
         }
