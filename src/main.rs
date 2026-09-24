@@ -10,7 +10,7 @@
 
 use core::pin::pin;
 
-use embassy_embedded_hal::adapter::BlockingAsync;
+use embassy_embedded_hal::adapter::{BlockingAsync, YieldingAsync};
 use embassy_executor::Spawner;
 use embassy_futures::join::join5;
 use embassy_futures::select::{select3, Either3};
@@ -29,7 +29,7 @@ use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcConfig, Attenuation};
 use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::ledc::channel::{self, ChannelIFace};
 use esp_hal::ledc::timer::{self, TimerIFace};
-use esp_hal::ledc::{Ledc, LSGlobalClkSource, LowSpeed};
+use esp_hal::ledc::{LSGlobalClkSource, Ledc, LowSpeed};
 use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_metadata_generated::memory_range;
@@ -41,7 +41,9 @@ use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
 use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::decl::soil_measurement::ClusterHandler as _;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
-use rs_matter_embassy::matter::dm::devices::test::{DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET};
+use rs_matter_embassy::matter::dm::devices::test::{
+    DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
+};
 use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
@@ -92,7 +94,8 @@ const BUMP_SIZE: usize = 24000;
 /// the reference example's 100 KiB for the same reason as `BUMP_SIZE`.
 const HEAP_SIZE: usize = 110 * 1024;
 
-const RECLAIMED_RAM: usize = memory_range!("DRAM2_UNINIT").end - memory_range!("DRAM2_UNINIT").start;
+const RECLAIMED_RAM: usize =
+    memory_range!("DRAM2_UNINIT").end - memory_range!("DRAM2_UNINIT").start;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -108,7 +111,10 @@ static FACTORY_RESET: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 /// clusters, so the sensor endpoint gets ID 1.
 const SOIL_ENDPOINT_ID: u16 = 1;
 
-const BASIC_INFO: BasicInfoConfig = BasicInfoConfig { sai: Some(500), ..TEST_DEV_DET };
+const BASIC_INFO: BasicInfoConfig = BasicInfoConfig {
+    sai: Some(500),
+    ..TEST_DEV_DET
+};
 
 const NODE: Node = Node {
     endpoints: &[
@@ -151,8 +157,16 @@ async fn main(_s: Spawner) {
 
     // Antenna/RF-switch setup, driven once at boot and held for the
     // firmware's lifetime - same as the original firmware.
-    let _rf_switch_en = Output::new(peripherals.GPIO3.reborrow(), Level::Low, OutputConfig::default());
-    let _antenna_sel = Output::new(peripherals.GPIO14.reborrow(), Level::High, OutputConfig::default());
+    let _rf_switch_en = Output::new(
+        peripherals.GPIO3.reborrow(),
+        Level::Low,
+        OutputConfig::default(),
+    );
+    let _antenna_sel = Output::new(
+        peripherals.GPIO14.reborrow(),
+        Level::High,
+        OutputConfig::default(),
+    );
 
     // The Matter stack needs a cryptographically-secure RNG for its whole
     // operational lifetime, and on this chip that requires exclusive access
@@ -171,7 +185,8 @@ async fn main(_s: Spawner) {
     // anywhere panics ("TRNG cannot be disabled while it's in use"), and
     // `reseeding_csprng`'s `ReseedingRng` holds one for as long as `crypto`
     // exists, i.e. for the rest of the program.
-    let trng_source = esp_hal::rng::TrngSource::new(peripherals.RNG.reborrow(), peripherals.ADC1.reborrow());
+    let trng_source =
+        esp_hal::rng::TrngSource::new(peripherals.RNG.reborrow(), peripherals.ADC1.reborrow());
     let mut seed = [0u8; 32];
     {
         let trng = esp_hal::rng::Trng::try_new().unwrap();
@@ -183,19 +198,31 @@ async fn main(_s: Spawner) {
 
     let mut weak_rand = crypto.weak_rand().unwrap();
     let discriminator = (weak_rand.next_u32() & 0xfff) as u16;
-    let mut ieee_eui64 = [0; 8];
-    weak_rand.fill_bytes(&mut ieee_eui64);
+
+    // Must be stable across reboots: Thread's SRP client registers services
+    // (e.g. the per-fabric "Commissioned" service) keyed by identifiers tied
+    // to this EUI64. A fresh random EUI64 every boot re-registers the same
+    // logical service under what the SRP server sees as a different host,
+    // which it rejects as a name conflict (`OT_ERROR_DUPLICATED`) - this was
+    // the actual cause of the device going "Offline" in Home Assistant after
+    // any reboot, confirmed by comparing `Registered SRP host <id>` across
+    // boots and finding a different id each time. The factory-programmed MAC
+    // (EUI-48) converted to EUI-64 (insert 0xFF, 0xFE per the standard
+    // conversion) is stable for the life of the chip.
+    let mac = esp_hal::efuse::base_mac_address();
+    let mac = mac.as_bytes();
+    let ieee_eui64 = [mac[0], mac[1], mac[2], 0xFF, 0xFE, mac[3], mac[4], mac[5]];
 
     // ADC1 is free now: one config hosts both the soil probe (GPIO1) and
     // battery (GPIO0) channels, matching the original firmware's shared
     // ADC-unit constraint (`battery_init` there requires `soil_probe_init`
     // to run first for the same reason).
     let mut adc_config = AdcConfig::new();
-    let battery_pin =
-        adc_config.enable_pin_with_cal::<_, AdcCalCurve<_>>(peripherals.GPIO0.reborrow(), Attenuation::_11dB);
-    let soil_pin =
-        adc_config.enable_pin_with_cal::<_, AdcCalCurve<_>>(peripherals.GPIO1.reborrow(), Attenuation::_11dB);
-    let mut adc = Adc::new(peripherals.ADC1.reborrow(), adc_config);
+    let battery_pin = adc_config
+        .enable_pin_with_cal::<_, AdcCalCurve<_>>(peripherals.GPIO0.reborrow(), Attenuation::_11dB);
+    let soil_pin = adc_config
+        .enable_pin_with_cal::<_, AdcCalCurve<_>>(peripherals.GPIO1.reborrow(), Attenuation::_11dB);
+    let mut adc = Adc::new(peripherals.ADC1.reborrow(), adc_config).into_async();
 
     // 200 kHz / 68% duty excitation PWM for the soil probe, idle (0% duty)
     // until a measurement is taken.
@@ -215,7 +242,8 @@ async fn main(_s: Spawner) {
             frequency: esp_hal::time::Rate::from_khz(pins::SOIL_EXCITATION_FREQ_KHZ),
         })
         .unwrap();
-    let mut excitation_channel = ledc.channel(channel::Number::Channel0, peripherals.GPIO21.reborrow());
+    let mut excitation_channel =
+        ledc.channel(channel::Number::Channel0, peripherals.GPIO21.reborrow());
     excitation_channel
         .configure(channel::config::Config {
             timer: &excitation_timer,
@@ -229,13 +257,28 @@ async fn main(_s: Spawner) {
 
     // Status LEDs.
     let status_leds = StatusLeds::new(
-        Output::new(peripherals.GPIO20.reborrow(), Level::Low, OutputConfig::default()),
-        Output::new(peripherals.GPIO18.reborrow(), Level::Low, OutputConfig::default()),
-        Output::new(peripherals.GPIO19.reborrow(), Level::Low, OutputConfig::default()),
+        Output::new(
+            peripherals.GPIO20.reborrow(),
+            Level::Low,
+            OutputConfig::default(),
+        ),
+        Output::new(
+            peripherals.GPIO18.reborrow(),
+            Level::Low,
+            OutputConfig::default(),
+        ),
+        Output::new(
+            peripherals.GPIO19.reborrow(),
+            Level::Low,
+            OutputConfig::default(),
+        ),
     );
 
     // User button, active low.
-    let button_input = Input::new(peripherals.GPIO2.reborrow(), InputConfig::default().with_pull(Pull::Up));
+    let button_input = Input::new(
+        peripherals.GPIO2.reborrow(),
+        InputConfig::default().with_pull(Pull::Up),
+    );
 
     // Flash: one physical peripheral, shared between Matter's own
     // persistence and our calibration storage (see `flash.rs`).
@@ -252,26 +295,41 @@ async fn main(_s: Spawner) {
     let calib = pt.iter().find(|p| p.label_as_str() == "calib").unwrap();
     let calib_range = calib.offset()..(calib.offset() + calib.len());
 
-    let flash_bus: SharedFlashBus = Mutex::new(BlockingAsync::new(flash_storage));
+    let flash_bus: SharedFlashBus =
+        Mutex::new(YieldingAsync::new(BlockingAsync::new(flash_storage)));
     let mut calibration = Calibration::load(SharedFlash(&flash_bus), calib_range).await;
 
     // Allocate the Matter stack statically - mandatory for the wireless
     // stack variation, and avoids blowing the program stack (~35-50 KiB).
-    let stack = mk_static!(EmbassyThreadMatterStack::<BUMP_SIZE, ()>)
-        .init_with(EmbassyThreadMatterStack::init(
+    let stack = mk_static!(EmbassyThreadMatterStack::<BUMP_SIZE, ()>).init_with(
+        EmbassyThreadMatterStack::init(
             &BASIC_INFO,
-            BasicCommData { password: TEST_DEV_COMM.password, discriminator },
+            BasicCommData {
+                password: TEST_DEV_COMM.password,
+                discriminator,
+            },
             &TEST_DEV_ATT,
-        ));
+        ),
+    );
 
-    let soil_handler =
-        SoilMeasurementHandler::new(SOIL_ENDPOINT_ID, Dataver::new_rand(&mut weak_rand), &SOIL_MOISTURE);
-    let power_handler = PowerSourceHandler::new(SOIL_ENDPOINT_ID, Dataver::new_rand(&mut weak_rand), &BATTERY);
+    let soil_handler = SoilMeasurementHandler::new(
+        SOIL_ENDPOINT_ID,
+        Dataver::new_rand(&mut weak_rand),
+        &SOIL_MOISTURE,
+    );
+    let power_handler = PowerSourceHandler::new(
+        SOIL_ENDPOINT_ID,
+        Dataver::new_rand(&mut weak_rand),
+        &BATTERY,
+    );
 
     let handler = EmptyHandler
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EmbassyThreadMatterStack::<0, ()>::root_handler(&(), &mut weak_rand)),
+            Async(EmbassyThreadMatterStack::<0, ()>::root_handler(
+                &(),
+                &mut weak_rand,
+            )),
         )
         .chain(
             |e, c| e == SOIL_ENDPOINT_ID && c == SoilMeasurementHandler::CLUSTER.id,
@@ -294,7 +352,10 @@ async fn main(_s: Spawner) {
     stack.startup(&crypto, &mut store).await.unwrap();
 
     if stack.matter().has_fabrics() {
-        info!("To reset, hold the button for {} s", pins::BUTTON_FACTORY_RESET_HOLD.as_secs());
+        info!(
+            "To reset, hold the button for {} s",
+            pins::BUTTON_FACTORY_RESET_HOLD.as_secs()
+        );
     }
 
     {
@@ -318,7 +379,14 @@ async fn main(_s: Spawner) {
         let app = pin!(join5(
             button::run(button_input, BUTTON_CHANNEL.sender()),
             status_leds.run(LED_CHANNEL.receiver()),
-            sample_worker(&mut soil_probe, &mut battery, &mut adc, &mut calibration, &soil_handler, &power_handler),
+            sample_worker(
+                &mut soil_probe,
+                &mut battery,
+                &mut adc,
+                &mut calibration,
+                &soil_handler,
+                &power_handler
+            ),
             dispatch_button_events(),
             periodic_ticker(),
         ));
@@ -363,7 +431,7 @@ async fn periodic_ticker() -> ! {
 async fn sample_worker<'d, SoilPin, BatPin>(
     soil_probe: &mut SoilProbe<'d, SoilPin>,
     battery: &mut Battery<'d, BatPin>,
-    adc: &mut Adc<'d, esp_hal::peripherals::ADC1<'d>, esp_hal::Blocking>,
+    adc: &mut Adc<'d, esp_hal::peripherals::ADC1<'d>, esp_hal::Async>,
     calibration: &mut Calibration<'_, 'd>,
     soil_handler: &SoilMeasurementHandler<'_>,
     power_handler: &PowerSourceHandler<'_>,
@@ -380,27 +448,36 @@ where
 
         if matches!(request, SampleRequest::Calibrate) {
             match calibration.run_flow(soil_probe, adc, leds).await {
-                Ok(()) => info!("Calibration accepted: dry={} mV wet={} mV", calibration.dry_mv(), calibration.wet_mv()),
+                Ok(()) => info!(
+                    "Calibration accepted: dry={} mV wet={} mV",
+                    calibration.dry_mv(),
+                    calibration.wet_mv()
+                ),
                 Err(e) => warn!("Calibration failed: {e:?}"),
             }
             continue;
         }
 
-        if let Some(mv) = soil_probe.sample_mv(adc).await {
-            let percent = soil_sensor_core::soil_moisture_percent(mv as i32, calibration.dry_mv(), calibration.wet_mv());
-            soil_handler.report(percent);
-            if matches!(request, SampleRequest::ShowLed) {
-                leds.send(LedCommand::ClassifyMoisture { moisture_percent: percent }).await;
-            }
-        } else {
-            warn!("Soil probe sample failed (no valid ADC reads)");
+        let mv = soil_probe.sample_mv(adc).await;
+        let percent = soil_sensor_core::soil_moisture_percent(
+            mv as i32,
+            calibration.dry_mv(),
+            calibration.wet_mv(),
+        );
+        soil_handler.report(percent);
+        if matches!(request, SampleRequest::ShowLed) {
+            leds.send(LedCommand::ClassifyMoisture {
+                moisture_percent: percent,
+            })
+            .await;
         }
 
-        if let Some(mv) = battery.sample_mv(adc).await {
-            let percent = soil_sensor_core::battery_percent(mv as i32, pins::BATTERY_EMPTY_MV, pins::BATTERY_FULL_MV);
-            power_handler.report(percent, mv);
-        } else {
-            warn!("Battery sample failed (no valid ADC reads)");
-        }
+        let mv = battery.sample_mv(adc).await;
+        let percent = soil_sensor_core::battery_percent(
+            mv as i32,
+            pins::BATTERY_EMPTY_MV,
+            pins::BATTERY_FULL_MV,
+        );
+        power_handler.report(percent, mv);
     }
 }

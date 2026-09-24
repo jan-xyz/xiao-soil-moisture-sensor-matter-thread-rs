@@ -10,7 +10,7 @@
 use embassy_time::Timer;
 use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcChannel, AdcPin};
 use esp_hal::peripherals::ADC1;
-use esp_hal::Blocking;
+use esp_hal::Async;
 
 use crate::pins::{BATTERY_SAMPLE_COUNT, BATTERY_SAMPLE_GAP};
 
@@ -27,18 +27,15 @@ where
     }
 
     /// Averages `BATTERY_SAMPLE_COUNT` calibrated reads, `BATTERY_SAMPLE_GAP`
-    /// apart, of the resting (unloaded) cell voltage.
-    pub async fn sample_mv(&mut self, adc: &mut Adc<'d, ADC1<'d>, Blocking>) -> Option<u32> {
+    /// apart, of the resting (unloaded) cell voltage. Yields to the executor
+    /// between reads rather than busy-spinning - see `SoilProbe::sample_mv`.
+    pub async fn sample_mv(&mut self, adc: &mut Adc<'d, ADC1<'d>, Async>) -> u32 {
         let mut sum = 0u32;
-        let mut valid = 0u32;
         for _ in 0..BATTERY_SAMPLE_COUNT {
-            if let Ok(mv) = nb::block!(adc.read_oneshot(&mut self.pin)) {
-                sum += u32::from(mv);
-                valid += 1;
-            }
+            sum += u32::from(adc.read_oneshot(&mut self.pin).await);
             Timer::after(BATTERY_SAMPLE_GAP).await;
         }
 
-        sum.checked_div(valid)
+        sum / BATTERY_SAMPLE_COUNT
     }
 }

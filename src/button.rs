@@ -43,7 +43,12 @@ pub async fn run(mut button: Input<'_>, events: ButtonSender<'_>) -> ! {
             continue;
         }
 
-        match select(button.wait_for_rising_edge(), Timer::after(BUTTON_FACTORY_RESET_HOLD)).await {
+        match select(
+            button.wait_for_rising_edge(),
+            Timer::after(BUTTON_FACTORY_RESET_HOLD),
+        )
+        .await
+        {
             Either::First(()) => count_clicks(&mut button, events).await,
             Either::Second(()) => {
                 events.send(ButtonEvent::FactoryReset).await;
@@ -59,8 +64,11 @@ pub async fn run(mut button: Input<'_>, events: ButtonSender<'_>) -> ! {
 async fn count_clicks(button: &mut Input<'_>, events: ButtonSender<'_>) {
     let mut clicks = 1u32;
 
-    while let Either::First(()) =
-        select(button.wait_for_falling_edge(), Timer::after(BUTTON_TRIPLE_CLICK_WINDOW)).await
+    while let Either::First(()) = select(
+        button.wait_for_falling_edge(),
+        Timer::after(BUTTON_TRIPLE_CLICK_WINDOW),
+    )
+    .await
     {
         clicks += 1;
         button.wait_for_rising_edge().await;

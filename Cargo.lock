@@ -4768,7 +4768,6 @@ dependencies = [
  "esp-rtos",
  "esp-storage",
  "log",
- "nb 1.1.0",
  "portable-atomic",
  "rs-matter-embassy",
  "sequential-storage",

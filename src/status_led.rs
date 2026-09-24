@@ -23,7 +23,11 @@ pub enum Color {
 #[derive(Clone, Copy, Debug)]
 pub enum LedCommand {
     /// Blink `count` on/off cycles of `color`, each phase `period` long.
-    Blink { color: Color, count: u32, period: Duration },
+    Blink {
+        color: Color,
+        count: u32,
+        period: Duration,
+    },
     /// One long blink of the color classifying `moisture_percent`: red =
     /// dry, yellow = almost dry, green = normal. Same thresholds as the
     /// original ESPHome firmware.
@@ -74,7 +78,11 @@ impl<'d> StatusLeds<'d> {
     pub async fn run(mut self, commands: LedReceiver<'_>) -> ! {
         loop {
             match commands.receive().await {
-                LedCommand::Blink { color, count, period } => {
+                LedCommand::Blink {
+                    color,
+                    count,
+                    period,
+                } => {
                     self.blink(color, count, period).await;
                 }
                 LedCommand::ClassifyMoisture { moisture_percent } => {

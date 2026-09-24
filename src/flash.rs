@@ -5,8 +5,15 @@
 //! `SeqMapKvBlobStore` (fabric/session state) and [`crate::calibration`]
 //! (dry/wet references), each over its own partition. Both borrow the same
 //! instance through this mutex instead of each claiming their own.
+//!
+//! Wrapped in `YieldingAsync`, not `BlockingAsync`: `BlockingAsync` gives the
+//! blocking driver an `async fn` signature without ever yielding inside it,
+//! so a sector erase (tens of ms on this chip) freezes every other task on
+//! this single-core executor - BLE, the Thread radio driver and the whole
+//! rs-matter run loop included - for the entire erase. `YieldingAsync` yields
+//! after each write and between each sector of a multi-sector erase instead.
 
-use embassy_embedded_hal::adapter::BlockingAsync;
+use embassy_embedded_hal::adapter::{BlockingAsync, YieldingAsync};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embedded_storage_async::nor_flash::{ErrorType, MultiwriteNorFlash, NorFlash, ReadNorFlash};
@@ -18,7 +25,11 @@ use esp_storage::{FlashStorage, FlashStorageError};
 /// a locked read of the real device - it does not change at runtime.
 const FLASH_CAPACITY: usize = 0x0040_0000;
 
-pub type SharedFlashBus<'d> = Mutex<CriticalSectionRawMutex, BlockingAsync<FlashStorage<'d>>>;
+/// `FlashStorage` only implements the blocking `NorFlash` traits, so
+/// `BlockingAsync` gives it an async signature first; `YieldingAsync` then
+/// wraps that to add the actual yield points (see module docs above).
+pub type SharedFlashBus<'d> =
+    Mutex<CriticalSectionRawMutex, YieldingAsync<BlockingAsync<FlashStorage<'d>>>>;
 
 /// A `NorFlash` handle onto a [`SharedFlashBus`]. Cheap to copy - just a
 /// reference - so both storage consumers can hold one.

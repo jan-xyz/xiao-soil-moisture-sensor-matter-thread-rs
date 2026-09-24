@@ -11,7 +11,7 @@ use core::ops::Range;
 use embassy_time::{Duration, Timer};
 use esp_hal::analog::adc::{Adc, AdcChannel};
 use esp_hal::peripherals::ADC1;
-use esp_hal::Blocking;
+use esp_hal::Async;
 use sequential_storage::cache::NoCache;
 use sequential_storage::map::{fetch_item, store_item};
 
@@ -25,8 +25,6 @@ const KEY_WET_MV: u8 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CalibrationError {
-    /// The probe could not take a measurement (no valid ADC reads).
-    SampleFailed,
     /// The dry and wet references were not far enough apart to be a real
     /// calibration (`dry_mv - wet_mv < SOIL_CAL_MIN_SPAN_MV`).
     SpanTooSmall,
@@ -50,18 +48,25 @@ impl<'a, 'd> Calibration<'a, 'd> {
         let mut cache = NoCache::new();
 
         let mut f = flash;
-        let dry_mv = fetch_item::<u8, i32, _>(&mut f, range.clone(), &mut cache, &mut buf, &KEY_DRY_MV)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or(SOIL_CAL_DEFAULT_DRY_MV);
-        let wet_mv = fetch_item::<u8, i32, _>(&mut f, range.clone(), &mut cache, &mut buf, &KEY_WET_MV)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or(SOIL_CAL_DEFAULT_WET_MV);
+        let dry_mv =
+            fetch_item::<u8, i32, _>(&mut f, range.clone(), &mut cache, &mut buf, &KEY_DRY_MV)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(SOIL_CAL_DEFAULT_DRY_MV);
+        let wet_mv =
+            fetch_item::<u8, i32, _>(&mut f, range.clone(), &mut cache, &mut buf, &KEY_WET_MV)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(SOIL_CAL_DEFAULT_WET_MV);
 
-        Self { flash, range, dry_mv, wet_mv }
+        Self {
+            flash,
+            range,
+            dry_mv,
+            wet_mv,
+        }
     }
 
     pub fn dry_mv(&self) -> i32 {
@@ -76,12 +81,26 @@ impl<'a, 'd> Calibration<'a, 'd> {
         let mut buf = [0u8; 32];
         let mut cache = NoCache::new();
 
-        store_item(&mut self.flash, self.range.clone(), &mut cache, &mut buf, &KEY_DRY_MV, &self.dry_mv)
-            .await
-            .map_err(|_| ())?;
-        store_item(&mut self.flash, self.range.clone(), &mut cache, &mut buf, &KEY_WET_MV, &self.wet_mv)
-            .await
-            .map_err(|_| ())?;
+        store_item(
+            &mut self.flash,
+            self.range.clone(),
+            &mut cache,
+            &mut buf,
+            &KEY_DRY_MV,
+            &self.dry_mv,
+        )
+        .await
+        .map_err(|_| ())?;
+        store_item(
+            &mut self.flash,
+            self.range.clone(),
+            &mut cache,
+            &mut buf,
+            &KEY_WET_MV,
+            &self.wet_mv,
+        )
+        .await
+        .map_err(|_| ())?;
 
         Ok(())
     }
@@ -94,7 +113,7 @@ impl<'a, 'd> Calibration<'a, 'd> {
     pub async fn run_flow<'probe, PIN>(
         &mut self,
         probe: &mut SoilProbe<'probe, PIN>,
-        adc: &mut Adc<'probe, ADC1<'probe>, Blocking>,
+        adc: &mut Adc<'probe, ADC1<'probe>, Async>,
         leds: LedSender<'_>,
     ) -> Result<(), CalibrationError>
     where
@@ -103,13 +122,23 @@ impl<'a, 'd> Calibration<'a, 'd> {
         const HOLD: Duration = Duration::from_secs(10);
         const BLINK_PERIOD: Duration = Duration::from_millis(500);
 
-        leds.send(LedCommand::Blink { color: Color::Red, count: 10, period: BLINK_PERIOD }).await;
+        leds.send(LedCommand::Blink {
+            color: Color::Red,
+            count: 10,
+            period: BLINK_PERIOD,
+        })
+        .await;
         Timer::after(HOLD).await;
-        let dry_mv = probe.sample_mv(adc).await.ok_or(CalibrationError::SampleFailed)?;
+        let dry_mv = probe.sample_mv(adc).await;
 
-        leds.send(LedCommand::Blink { color: Color::Green, count: 10, period: BLINK_PERIOD }).await;
+        leds.send(LedCommand::Blink {
+            color: Color::Green,
+            count: 10,
+            period: BLINK_PERIOD,
+        })
+        .await;
         Timer::after(HOLD).await;
-        let wet_mv = probe.sample_mv(adc).await.ok_or(CalibrationError::SampleFailed)?;
+        let wet_mv = probe.sample_mv(adc).await;
 
         if (dry_mv as i32) - (wet_mv as i32) < SOIL_CAL_MIN_SPAN_MV {
             return Err(CalibrationError::SpanTooSmall);
@@ -117,6 +146,8 @@ impl<'a, 'd> Calibration<'a, 'd> {
 
         self.dry_mv = dry_mv as i32;
         self.wet_mv = wet_mv as i32;
-        self.persist().await.map_err(|()| CalibrationError::PersistFailed)
+        self.persist()
+            .await
+            .map_err(|()| CalibrationError::PersistFailed)
     }
 }

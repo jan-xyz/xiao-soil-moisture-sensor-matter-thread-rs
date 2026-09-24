@@ -67,7 +67,6 @@ rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", defa
 
 sequential-storage = "3"
 embedded-storage-async = "0.4.1"
-nb = "1"
 
 tinyrlibc = { version = "0.5", default-features = false, features = ["memchr", "utoa", "strtoul"] }
 static_cell = "2"
