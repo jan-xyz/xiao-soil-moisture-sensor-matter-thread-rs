@@ -3575,7 +3575,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-embassy"
 version = "0.1.0"
-source = "git+https://github.com/sysgrok/rs-matter-embassy#ecc674f7bacf81dded484b96123a31e59cd44cf8"
+source = "git+https://github.com/jan-xyz/rs-matter-embassy?rev=7d201d2962d09050467e8cfd6cc5011bf0ebd91d#7d201d2962d09050467e8cfd6cc5011bf0ebd91d"
 dependencies = [
  "bt-hci 0.10.1",
  "cfg-if",
@@ -3622,8 +3622,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-stack"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "051f3ab6cf95969cd347dbe96782a1550982bdf73e8f3b3540b11e9365de9afd"
+source = "git+https://github.com/jan-xyz/rs-matter-stack?rev=c22e5b11ab08f8117178611152c7c2bf3b823a9d#c22e5b11ab08f8117178611152c7c2bf3b823a9d"
 dependencies = [
  "bitflags 2.13.2",
  "cfg-if",

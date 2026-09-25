@@ -38,6 +38,15 @@ deliberately does not match every feature of the C++ original. See
   recalibration, and vice versa.
 - Periodic background sampling (every 30 s), reporting only when a reading
   moved enough to matter, so ADC jitter does not wake the Thread radio.
+- Thread Sleepy End Device with an adaptive duty cycle: the receiver is off
+  between data polls, idling at the SIT period (`THREAD_SIT_POLL_PERIOD_MS`) or
+  the longer LIT period (`THREAD_LIT_POLL_PERIOD_MS`) following the controller's
+  ICD setting, and shortening to `THREAD_ACTIVE_POLL_PERIOD_MS` for
+  `THREAD_ACTIVE_HOLD` after a button press, an ICD stay-active request, or while
+  commissioning. Optional CPU light sleep (`--features light-sleep`).
+- LIT ICD: hosts the Matter ICD Management cluster on endpoint 0 and
+  periodically sweeps registered clients with a Check-In when their subscription
+  has lapsed (`CHECK_IN_PERIOD`).
 
 ### Why hand-written cluster handlers?
 
@@ -55,9 +64,6 @@ hand-written `impl ClusterHandler`.
 
 Deliberately out of scope for this port (all present in the C++ original):
 
-- **LIT ICD / light sleep.** This runs as an always-on Thread end device.
-  `rs-matter-stack` has no ICD/sleepy-end-device wiring at all as of this
-  writing, so there was nothing to hook into for this v1.
 - **Matter OTA over Thread.** No OTA partitions or requestor.
 - **Battery sag / internal-resistance health measurement.** Only resting
   voltage is reported; the LED-load-based health check is not implemented.

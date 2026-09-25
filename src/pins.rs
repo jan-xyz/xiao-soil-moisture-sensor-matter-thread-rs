@@ -47,3 +47,49 @@ pub const MOISTURE_NORMAL_ABOVE_PERCENT: u8 = 58;
 pub const BUTTON_TRIPLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
 pub const BUTTON_FACTORY_RESET_HOLD: Duration = Duration::from_secs(10);
 pub const BUTTON_DEBOUNCE: Duration = Duration::from_millis(20);
+
+/// SED idle data-poll period for **SIT** ("Standard") mode, i.e. while no ICD
+/// client is registered and the controller expects responsiveness. Deliberately
+/// aligned with [`SAMPLE_PERIOD_SECS`]: the only useful wake-up is the uplink
+/// report (sent when a reading moved), so polling faster than we sample buys
+/// nothing.
+pub const THREAD_SIT_POLL_PERIOD_MS: u32 = SAMPLE_PERIOD_SECS * 1_000;
+
+/// SED idle data-poll period for **LIT** ("Battery Saver") mode, i.e. while an
+/// ICD client is registered and its subscription is parked, so long silence is
+/// expected. Must stay below `THREAD_CHILD_TIMEOUT_S` and the advertised
+/// `ICD_MODE.idle_mode_duration_s`, or OpenThread clamps the effective period.
+pub const THREAD_LIT_POLL_PERIOD_MS: u32 = 900_000;
+
+/// SED active data-poll period (ms), used for [`THREAD_ACTIVE_HOLD`] after boot
+/// or a local button press / ICD stay-active request, so the controller's
+/// response lands promptly.
+pub const THREAD_ACTIVE_POLL_PERIOD_MS: u32 = 5_000;
+
+/// How long the SED stays in the active poll period after the last nudge.
+pub const THREAD_ACTIVE_HOLD: Duration = Duration::from_secs(30);
+
+/// Background sampling cadence (seconds). The measurement loop wakes the CPU
+/// this often regardless of the radio's poll schedule.
+pub const SAMPLE_PERIOD_SECS: u32 = 30;
+
+/// Thread child timeout (seconds). The parent evicts this node if it goes this
+/// long without hearing from it, so this must exceed the longest idle poll
+/// period ([`THREAD_LIT_POLL_PERIOD_MS`]).
+pub const THREAD_CHILD_TIMEOUT_S: u32 = 1_800;
+
+/// esp-radio 802.15.4 receive-queue depth (frames buffered before drops, logged
+/// as "Receive queue full"). esp-radio's own default of 10 is too small for
+/// OpenThread's RX bursts; the `openthread` crate raises it to 50. A sleepy end
+/// device gets its downlink in bursts after each data poll, so give it more
+/// headroom. Each queued frame is a ~130-byte heap buffer held until reset, so
+/// 200 caps the worst case at roughly 26 KB.
+pub const THREAD_RX_QUEUE_SIZE: usize = 200;
+
+/// How often the ICD Check-In sweeper runs. This only inspects the subscription
+/// table and messages registered clients whose subscription has lapsed, so it
+/// is not a message per interval.
+pub const CHECK_IN_PERIOD: Duration = Duration::from_secs(300);
+
+/// Scratch buffer for building a Check-In message.
+pub const CHECK_IN_BUF: usize = 256;

@@ -26,6 +26,10 @@ opt-level = "s"
 [features]
 default = ["esp32c6", "trouble", "thread"]
 trouble = ["rs-matter-embassy/trouble"]
+# Automatic CPU light sleep (esp-rtos idle hook). Off by default because it
+# breaks USB-Serial/JTAG logging; enable for power measurement over UART.
+# Only effective together with the sleepy-end-device config (see src/main.rs).
+light-sleep = []
 esp32c6 = [
   "esp-rtos/esp32c6",
   "esp-hal/esp32c6",
@@ -60,7 +64,9 @@ esp-storage = { version = "0.10", features = ["embedded-storage"] }
 esp-bootloader-esp-idf = { version = "0.6", features = ["log-04"] }
 esp-metadata-generated = "0.5"
 
-rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", default-features = false, features = [
+# Pinned to our fork's `matter-sed-icd` branch: adaptive SED poll periods plus a
+# hook that lets the app drive ICD Check-Ins (via the rs-matter-stack patch below).
+rs-matter-embassy = { git = "https://github.com/jan-xyz/rs-matter-embassy", rev = "7d201d2962d09050467e8cfd6cc5011bf0ebd91d", default-features = false, features = [
   "esp",
   "log",
 ] }
@@ -73,6 +79,9 @@ static_cell = "2"
 portable-atomic = "1"
 
 [patch.crates-io]
+# Pinned to our fork's `matter-sed-icd` branch. Exposes the interaction model's
+# subscription table, which the app needs to send Matter ICD Check-In messages.
+rs-matter-stack = { git = "https://github.com/jan-xyz/rs-matter-stack", rev = "c22e5b11ab08f8117178611152c7c2bf3b823a9d" }
 esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
 esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
 esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }

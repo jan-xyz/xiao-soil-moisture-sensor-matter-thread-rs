@@ -13,12 +13,12 @@ use core::pin::pin;
 use embassy_embedded_hal::adapter::{BlockingAsync, YieldingAsync};
 use embassy_executor::Spawner;
 use embassy_futures::join::join5;
-use embassy_futures::select::{select3, Either3};
+use embassy_futures::select::{select, select3, Either3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
-use embassy_time::Timer;
+use embassy_time::{Duration, Timer};
 
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
@@ -41,18 +41,27 @@ use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
 use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::decl::soil_measurement::ClusterHandler as _;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
+use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{
+    ClusterHandler as _, Icd, IcdMgmtHandler, IcdModeConfig, OperatingModeEnum,
+};
 use rs_matter_embassy::matter::dm::devices::test::{
     DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
 };
+use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ROOT_NODE;
 use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
+use rs_matter_embassy::matter::error::Error;
+use rs_matter_embassy::matter::im::subscriptions::Subscriptions;
+use rs_matter_embassy::matter::persist::{KvBlobStore, KvBlobStoreAccess};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
-use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
+use rs_matter_embassy::matter::{clusters, devices, BasicCommData, Matter};
 use rs_matter_embassy::persist::SeqMapKvBlobStore;
 use rs_matter_embassy::stack::rand::rand_core::SeedableRng;
 use rs_matter_embassy::stack::rand::ChaCha12Rng;
 use rs_matter_embassy::wireless::esp::EspThreadDriver;
-use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
+use rs_matter_embassy::wireless::{
+    EmbassyThread, EmbassyThreadMatterStack, SedHandle, ThreadSedConfig,
+};
 
 use tinyrlibc as _;
 
@@ -107,6 +116,11 @@ static LED_CHANNEL: status_led::LedChannel = Channel::new();
 static SAMPLE_CHANNEL: Channel<CriticalSectionRawMutex, SampleRequest, 4> = Channel::new();
 static FACTORY_RESET: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
+/// Application handle for the SED duty cycle: button presses and ICD
+/// stay-active requests reopen the responsive window, and `icd_poll_mode_task`
+/// switches the idle poll period between the SIT and LIT profiles.
+static SED: SedHandle = SedHandle::new(pins::THREAD_SIT_POLL_PERIOD_MS);
+
 /// Endpoint 0 (the root endpoint) always runs the hidden Matter system
 /// clusters, so the sensor endpoint gets ID 1.
 const SOIL_ENDPOINT_ID: u16 = 1;
@@ -116,9 +130,33 @@ const BASIC_INFO: BasicInfoConfig = BasicInfoConfig {
     ..TEST_DEV_DET
 };
 
+/// The ICD Management cluster lives on the root endpoint. `root_endpoint!`
+/// cannot forward extra clusters, but the `clusters!(thread ; ...)` form can,
+/// so the endpoint is spelled out here (the same expansion as the stack's
+/// `root_endpoint()`, plus ICD Management). This keeps the ICD state and
+/// handler app-local, exactly like the soil/battery clusters.
+const ROOT_ENDPOINT: Endpoint<'static> = Endpoint {
+    id: ROOT_ENDPOINT_ID,
+    device_types: devices!(DEV_TYPE_ROOT_NODE),
+    clusters: clusters!(thread ; IcdMgmtHandler::CLUSTER),
+    client_clusters: &[],
+    unique_id: None,
+    semantic_tags: &[],
+};
+
+/// Long-Idle-Time ICD timings. This node is a Thread SED, so it advertises the
+/// LITS feature and flips between SIT and LIT as clients register/unregister.
+const ICD_MODE: IcdModeConfig = IcdModeConfig {
+    idle_mode_duration_s: 3_600,
+    active_mode_duration_ms: 1_000,
+    active_mode_threshold_ms: 300,
+    user_active_mode_trigger_hint: 0,
+    user_active_mode_trigger_instruction: "",
+};
+
 const NODE: Node = Node {
     endpoints: &[
-        EmbassyThreadMatterStack::<0, ()>::root_endpoint(),
+        ROOT_ENDPOINT,
         Endpoint::new(
             SOIL_ENDPOINT_ID,
             devices!(DEV_TYPE_SOIL_SENSOR),
@@ -131,9 +169,10 @@ const NODE: Node = Node {
     ],
 };
 
-/// One periodic sample every 30 s, matching the original firmware's
-/// "silent" background sampling cadence.
-const SAMPLE_PERIOD: embassy_time::Duration = embassy_time::Duration::from_secs(30);
+/// One periodic sample every [`pins::SAMPLE_PERIOD_SECS`] seconds, matching the
+/// original firmware's "silent" background sampling cadence.
+const SAMPLE_PERIOD: embassy_time::Duration =
+    embassy_time::Duration::from_secs(pins::SAMPLE_PERIOD_SECS as u64);
 
 #[derive(Clone, Copy, Debug)]
 enum SampleRequest {
@@ -147,12 +186,35 @@ async fn main(_s: Spawner) {
     esp_println::logger::init_logger_from_env();
     info!("Starting...");
 
+    // TEMPORARY diagnostic: which build is this?
+    #[cfg(feature = "light-sleep")]
+    info!("CPU light sleep: ENABLED");
+    #[cfg(not(feature = "light-sleep"))]
+    info!("CPU light sleep: DISABLED (build without --features light-sleep)");
+
     heap_allocator!(size: HEAP_SIZE - RECLAIMED_RAM);
     heap_allocator!(#[ram(reclaimed)] size: RECLAIMED_RAM);
 
     let mut peripherals = esp_hal::init(esp_hal::Config::default());
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
+
+    // Automatic CPU light sleep: whenever no task is ready and no
+    // `esp_hal::rtc_cntl::WakeLock` is held, the chip sleeps until the next
+    // scheduled wakeup. This only pays off once the Thread radio is a sleepy
+    // end device (see `ThreadSedConfig` below) - an always-listening radio
+    // holds wake locks and wakes the chip continuously. NB: light sleep breaks
+    // USB-Serial/JTAG logging, so measure over the UART pins.
+    #[cfg(feature = "light-sleep")]
+    let sleep = esp_rtos::sleep::configure(peripherals.LPWR);
+
+    #[cfg(feature = "light-sleep")]
+    esp_rtos::start_with_idle_hook(
+        timg0.timer0,
+        peripherals.FROM_CPU_INTR0,
+        sleep.light_sleep_hook,
+    );
+    #[cfg(not(feature = "light-sleep"))]
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
     // Antenna/RF-switch setup, driven once at boot and held for the
@@ -323,6 +385,19 @@ async fn main(_s: Spawner) {
         &BATTERY,
     );
 
+    // `Icd` is `!Sync` (it embeds a blocking mutex over a no-op raw mutex), so
+    // it cannot live in a `static`. Leak one instance into the global allocator
+    // instead: the handler needs a `'static` reference and the executor is
+    // single-threaded. Persistence and mDNS operating-mode publishing are
+    // handled by `IcdMgmtHandler`'s lifecycle hooks.
+    let icd: &'static Icd =
+        alloc::boxed::Box::leak(alloc::boxed::Box::new(Icd::new(1_000, ICD_MODE)));
+
+    // NB: `EmptyHandler::chain` wraps LIFO - the *last* chained matcher is
+    // evaluated first. The broad root matcher (`ROOT_ENDPOINT_ID`, any cluster)
+    // must be chained BEFORE the ICD matcher, otherwise it is evaluated first,
+    // claims every endpoint-0 cluster, and answers ICD Management reads with
+    // `EndpointNotFound` (its own chain has no ICD handler).
     let handler = EmptyHandler
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
@@ -330,6 +405,10 @@ async fn main(_s: Spawner) {
                 &(),
                 &mut weak_rand,
             )),
+        )
+        .chain(
+            |e, c| e == ROOT_ENDPOINT_ID && c == IcdMgmtHandler::CLUSTER.id,
+            Async(IcdMgmtHandler::new(Dataver::new_rand(&mut weak_rand), icd).adapt()),
         )
         .chain(
             |e, c| e == SOIL_ENDPOINT_ID && c == SoilMeasurementHandler::CLUSTER.id,
@@ -363,12 +442,21 @@ async fn main(_s: Spawner) {
 
         let matter = pin!(stack.run_coex(
             EmbassyThread::new(
-                EspThreadDriver::new(peripherals.IEEE802154.reborrow(), peripherals.BT.reborrow()),
+                EspThreadDriver::new(peripherals.IEEE802154.reborrow(), peripherals.BT.reborrow())
+                    .with_rx_queue_size(pins::THREAD_RX_QUEUE_SIZE),
                 crypto.rand().unwrap(),
                 ieee_eui64,
                 &kv,
                 stack,
                 true,
+            )
+            .with_sed(
+                ThreadSedConfig {
+                    active_poll_period_ms: pins::THREAD_ACTIVE_POLL_PERIOD_MS,
+                    active_hold: pins::THREAD_ACTIVE_HOLD,
+                    child_timeout_s: Some(pins::THREAD_CHILD_TIMEOUT_S),
+                },
+                &SED,
             ),
             &crypto,
             (NODE, &handler),
@@ -377,18 +465,24 @@ async fn main(_s: Spawner) {
         ));
 
         let app = pin!(join5(
-            button::run(button_input, BUTTON_CHANNEL.sender()),
-            status_leds.run(LED_CHANNEL.receiver()),
-            sample_worker(
-                &mut soil_probe,
-                &mut battery,
-                &mut adc,
-                &mut calibration,
-                &soil_handler,
-                &power_handler
+            join5(
+                button::run(button_input, BUTTON_CHANNEL.sender()),
+                status_leds.run(LED_CHANNEL.receiver()),
+                sample_worker(
+                    &mut soil_probe,
+                    &mut battery,
+                    &mut adc,
+                    &mut calibration,
+                    &soil_handler,
+                    &power_handler
+                ),
+                dispatch_button_events(),
+                periodic_ticker(),
             ),
-            dispatch_button_events(),
-            periodic_ticker(),
+            check_in_task(icd, stack.matter(), &crypto, stack.subscriptions(), &kv),
+            icd_stay_active_task(icd),
+            commissioning_keepalive_task(stack.matter()),
+            icd_poll_mode_task(icd),
         ));
 
         match select3(matter, FACTORY_RESET.wait(), app).await {
@@ -410,8 +504,14 @@ async fn dispatch_button_events() -> ! {
     let events = BUTTON_CHANNEL.receiver();
     loop {
         match events.receive().await {
-            ButtonEvent::SampleNow => SAMPLE_CHANNEL.send(SampleRequest::ShowLed).await,
-            ButtonEvent::Calibrate => SAMPLE_CHANNEL.send(SampleRequest::Calibrate).await,
+            ButtonEvent::SampleNow => {
+                SED.request_active();
+                SAMPLE_CHANNEL.send(SampleRequest::ShowLed).await;
+            }
+            ButtonEvent::Calibrate => {
+                SED.request_active();
+                SAMPLE_CHANNEL.send(SampleRequest::Calibrate).await;
+            }
             ButtonEvent::FactoryReset => FACTORY_RESET.signal(()),
         }
     }
@@ -421,6 +521,19 @@ async fn dispatch_button_events() -> ! {
 async fn periodic_ticker() -> ! {
     loop {
         Timer::after(SAMPLE_PERIOD).await;
+
+        // TEMPORARY diagnostics: `wakeup cause` is empty unless the CPU entered
+        // light sleep; `wake lock active` says whether something holds a
+        // WakeLock; `uptime` resets on reboot, so a long capture shows restarts.
+        info!(
+            "wakeup cause: {:?}, wake lock active: {}, uptime: {}s",
+            esp_hal::system::wakeup_cause(),
+            esp_hal::rtc_cntl::WakeLock::is_active(),
+            esp_hal::time::Instant::now()
+                .duration_since_epoch()
+                .as_secs(),
+        );
+
         SAMPLE_CHANNEL.send(SampleRequest::Silent).await;
     }
 }
@@ -479,5 +592,118 @@ where
             pins::BATTERY_FULL_MV,
         );
         power_handler.report(percent, mv);
+    }
+}
+
+/// Adapts a shared [`KvBlobStoreAccess`] into a raw [`KvBlobStore`], so the ICD
+/// Check-In sender can persist its counter through the same store the rest of
+/// the stack uses. `send_check_in` only ever calls `store`.
+struct AccessStore<'a, K: KvBlobStoreAccess>(&'a K);
+
+impl<K: KvBlobStoreAccess> KvBlobStore for AccessStore<'_, K> {
+    fn load<'a>(&mut self, key: u16, buf: &'a mut [u8]) -> Result<Option<&'a [u8]>, Error> {
+        let mut len = 0;
+        let mut found = false;
+
+        self.0.access(|store, scratch| {
+            if let Ok(Some(data)) = store.load(key, scratch) {
+                len = data.len().min(buf.len());
+                buf[..len].copy_from_slice(&data[..len]);
+                found = true;
+            }
+        });
+
+        Ok(found.then(|| &buf[..len]))
+    }
+
+    fn store(&mut self, key: u16, data: &[u8], _buf: &mut [u8]) -> Result<(), Error> {
+        self.0
+            .access(|store, scratch| store.store(key, data, scratch))
+    }
+
+    fn remove(&mut self, key: u16, _buf: &mut [u8]) -> Result<(), Error> {
+        self.0.access(|store, scratch| store.remove(key, scratch))
+    }
+}
+
+/// Keeps the SED responsive while the node is uncommissioned or a commissioning
+/// window is open. Commissioning reads/writes run over the operational network
+/// *before* the fabric exists, so letting the poll period decay to idle during
+/// setup can stall or time out the commissioning exchanges.
+async fn commissioning_keepalive_task(matter: &Matter<'_>) -> ! {
+    const NUDGE: Duration = Duration::from_secs(10);
+
+    loop {
+        Timer::after(NUDGE).await;
+
+        if !matter.has_fabrics() || matter.comm_window_state().is_open_on_all_transports() {
+            SED.request_active();
+        }
+    }
+}
+
+/// Follows the controller's ICD setting: while an ICD client is registered
+/// (LIT, "Battery Saver") the idle poll period is long; otherwise (SIT,
+/// "Standard") it is short. Re-checks on registration changes and periodically
+/// as a fallback - the interaction model loads persisted registrations during
+/// startup, which can happen after this task first runs.
+async fn icd_poll_mode_task(icd: &Icd) -> ! {
+    const RECHECK: Duration = Duration::from_secs(60);
+
+    let mut applied: Option<u32> = None;
+
+    loop {
+        let poll_period_ms = match icd.operating_mode() {
+            OperatingModeEnum::LIT => pins::THREAD_LIT_POLL_PERIOD_MS,
+            OperatingModeEnum::SIT => pins::THREAD_SIT_POLL_PERIOD_MS,
+        };
+
+        if applied != Some(poll_period_ms) {
+            applied = Some(poll_period_ms);
+            info!("ICD idle poll period -> {poll_period_ms} ms");
+            SED.set_idle_period(poll_period_ms);
+        }
+
+        let _ = select(icd.wait_registrations_changed(), Timer::after(RECHECK)).await;
+    }
+}
+
+/// Reopens the SED active window whenever the controller asks the device to
+/// stay active (an ICD `StayActiveRequest`), keeping it reachable for the
+/// requested duration.
+async fn icd_stay_active_task(icd: &Icd) -> ! {
+    loop {
+        icd.wait_active_extended().await;
+        info!("ICD StayActiveRequest: reopening the SED active window");
+        SED.request_active();
+    }
+}
+
+/// Runs the ICD Check-In sweep: periodically asks the shared [`Icd`] state to
+/// message every registered client whose subscription has lapsed. An idle sweep
+/// sends nothing - `send_check_in` filters on subscription liveness internally.
+async fn check_in_task<C, K, const NS: usize>(
+    icd: &Icd,
+    matter: &Matter<'_>,
+    crypto: C,
+    subscriptions: &Subscriptions<NS>,
+    kv: K,
+) -> !
+where
+    C: Crypto + Copy,
+    K: KvBlobStoreAccess,
+{
+    let mut buf = [0u8; pins::CHECK_IN_BUF];
+
+    loop {
+        Timer::after(pins::CHECK_IN_PERIOD).await;
+
+        match icd
+            .send_check_in(matter, crypto, subscriptions, AccessStore(&kv), &mut buf)
+            .await
+        {
+            Ok(()) => info!("ICD Check-In sweep complete"),
+            Err(e) => warn!("ICD Check-In sweep failed: {e:?}"),
+        }
     }
 }
