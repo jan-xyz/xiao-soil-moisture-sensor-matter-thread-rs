@@ -12,7 +12,7 @@ use core::pin::pin;
 
 use embassy_embedded_hal::adapter::{BlockingAsync, YieldingAsync};
 use embassy_executor::Spawner;
-use embassy_futures::join::join5;
+use embassy_futures::join::{join, join5};
 use embassy_futures::select::{select, select3, Either3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -460,7 +460,10 @@ async fn main(_s: Spawner) {
             check_in_task(icd, stack.matter(), &crypto, stack.subscriptions(), &kv),
             icd_stay_active_task(icd),
             commissioning_keepalive_task(stack.matter()),
-            icd_poll_mode_task(icd),
+            join(
+                icd_poll_mode_task(icd),
+                persist_reboot_count_task(stack.matter(), &kv)
+            ),
         ));
 
         match select3(matter, FACTORY_RESET.wait(), app).await {
@@ -588,6 +591,18 @@ impl<K: KvBlobStoreAccess> KvBlobStore for AccessStore<'_, K> {
 
     fn remove(&mut self, key: u16, _buf: &mut [u8]) -> Result<(), Error> {
         self.0.access(|store, scratch| store.remove(key, scratch))
+    }
+}
+
+/// Records this boot in the persisted `RebootCount` once the node has run for
+/// [`pins::REBOOT_COUNT_HEALTHY_AFTER`]. `Matter::startup` only loads the
+/// count, and writing it later keeps a boot loop from spending flash writes.
+async fn persist_reboot_count_task<K: KvBlobStoreAccess>(matter: &Matter<'_>, kv: K) {
+    Timer::after(pins::REBOOT_COUNT_HEALTHY_AFTER).await;
+
+    match matter.persist_reboot_count(kv) {
+        Ok(()) => info!("Reboot count {} persisted", matter.reboot_count()),
+        Err(e) => warn!("Reboot count persist failed: {e:?}"),
     }
 }
 

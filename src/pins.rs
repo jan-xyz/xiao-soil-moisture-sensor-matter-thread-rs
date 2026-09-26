@@ -93,3 +93,7 @@ pub const CHECK_IN_PERIOD: Duration = Duration::from_secs(300);
 
 /// Scratch buffer for building a Check-In message.
 pub const CHECK_IN_BUF: usize = 256;
+
+/// How long a boot must run before it counts in the persisted Matter
+/// `RebootCount` (General Diagnostics cluster).
+pub const REBOOT_COUNT_HEALTHY_AFTER: Duration = Duration::from_secs(60);
