@@ -83,14 +83,15 @@ pub const THREAD_ACTIVE_POLL_PERIOD_MS: u32 = 5_000;
 /// How long the SED stays in the active poll period after the last nudge.
 pub const THREAD_ACTIVE_HOLD: Duration = Duration::from_secs(30);
 
-/// SED poll period (ms) for a short burst after the device sends a report, so
-/// the controller's reply is fetched from the parent at once instead of after
-/// a retransmission. Matches the connectedhomeip default ICD fast-poll interval.
+/// SED poll period (ms) for a short burst after the device sends any Matter
+/// message, so the controller's reply is fetched from the parent at once
+/// instead of after a retransmission. Matches the connectedhomeip default ICD
+/// fast-poll interval.
 pub const THREAD_FAST_POLL_PERIOD_MS: u32 = 200;
 
-/// How long the fast-poll burst lasts (ms). It is also the advertised Matter
-/// ICD active-mode duration (`ICD_MODE.active_mode_duration_ms`), because the
-/// burst is that active mode.
+/// How long the fast-poll burst lasts after the last sent message (ms). It is
+/// also the advertised Matter ICD active-mode duration
+/// (`ICD_MODE.active_mode_duration_ms`), because the burst is that active mode.
 pub const THREAD_FAST_HOLD_MS: u32 = 1_000;
 
 /// Background sampling cadence (seconds). The measurement loop wakes the CPU

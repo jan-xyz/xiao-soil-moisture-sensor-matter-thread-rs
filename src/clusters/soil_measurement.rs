@@ -77,9 +77,8 @@ impl<'a> SoilMeasurementHandler<'a> {
     /// Called by the sampling loop with a freshly measured percent. Only
     /// reports (bumps the dataver and wakes `run()` to push a subscription
     /// update) when the reading moved by at least `SOIL_REPORT_DELTA_PERCENT`,
-    /// so ADC jitter does not wake the Thread radio. Returns whether it
-    /// reported.
-    pub fn report(&self, percent: u8) -> bool {
+    /// so ADC jitter does not wake the Thread radio.
+    pub fn report(&self, percent: u8) {
         let should_report = match self.value.get() {
             Some(previous) => previous.abs_diff(percent) >= SOIL_REPORT_DELTA_PERCENT,
             None => true,
@@ -93,8 +92,6 @@ impl<'a> SoilMeasurementHandler<'a> {
         }
 
         log::info!("Soil moisture: {percent}% (reported change: {should_report})");
-
-        should_report
     }
 }
 

@@ -126,8 +126,8 @@ impl<'a> PowerSourceHandler<'a> {
     /// (bumps the dataver and wakes `run()` to push a subscription update)
     /// when the voltage moved by at least `BATTERY_REPORT_DELTA_MV`, or when
     /// an estimate becomes available or unavailable, so ADC jitter does not
-    /// wake the Thread radio. Returns whether it reported.
-    pub fn report(&self, percent: u8, rest_mv: u32, time_remaining_s: Option<u32>) -> bool {
+    /// wake the Thread radio.
+    pub fn report(&self, percent: u8, rest_mv: u32, time_remaining_s: Option<u32>) {
         let previous = self.reading.get();
         let should_report = match previous.rest_mv {
             Some(previous_mv) => {
@@ -147,8 +147,6 @@ impl<'a> PowerSourceHandler<'a> {
             self.dataver.changed();
             self.changed.signal(());
         }
-
-        should_report
     }
 }
 

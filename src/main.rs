@@ -552,7 +552,7 @@ where
             calibration.dry_mv(),
             calibration.wet_mv(),
         );
-        let soil_reported = soil_handler.report(percent);
+        soil_handler.report(percent);
         if matches!(request, SampleRequest::ShowLed) {
             leds.send(LedCommand::ClassifyMoisture {
                 moisture_percent: percent,
@@ -572,11 +572,7 @@ where
             pins::BATTERY_TIME_REMAINING_MIN_SPAN_SECS,
             pins::BATTERY_TIME_REMAINING_MIN_DROP_MV,
         );
-        let battery_reported = power_handler.report(percent, mv, time_remaining_s);
-
-        if soil_reported || battery_reported {
-            SED.request_fast_polls();
-        }
+        power_handler.report(percent, mv, time_remaining_s);
     }
 }
 
