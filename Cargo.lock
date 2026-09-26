@@ -1520,12 +1520,13 @@ dependencies = [
 [[package]]
 name = "esp-alloc"
 version = "0.11.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "allocator-api2",
  "document-features",
  "enumset",
  "esp-config",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.1",
  "esp-sync",
  "linked_list_allocator",
  "rlsf",
@@ -1534,10 +1535,11 @@ dependencies = [
 [[package]]
 name = "esp-backtrace"
 version = "0.20.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "document-features",
  "esp-config",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.1",
  "esp-println",
  "heapless 0.9.3",
  "riscv",
@@ -1547,11 +1549,12 @@ dependencies = [
 [[package]]
 name = "esp-bootloader-esp-idf"
 version = "0.6.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "document-features",
  "esp-config",
  "esp-hal-procmacros",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.1",
  "esp-rom-sys",
  "esp-storage",
  "jiff",
@@ -1563,9 +1566,10 @@ dependencies = [
 [[package]]
 name = "esp-config"
 version = "0.8.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "document-features",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.1",
  "serde",
  "serde_yaml",
  "somni-expr",
@@ -1574,6 +1578,7 @@ dependencies = [
 [[package]]
 name = "esp-hal"
 version = "1.2.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "bitfield 0.19.5",
  "bytemuck",
@@ -1595,7 +1600,7 @@ dependencies = [
  "enumset",
  "esp-config",
  "esp-hal-procmacros",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.1",
  "esp-riscv-rt",
  "esp-rom-sys",
  "esp-sync",
@@ -1631,6 +1636,7 @@ dependencies = [
 [[package]]
 name = "esp-hal-procmacros"
 version = "0.23.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "document-features",
  "object",
@@ -1666,16 +1672,24 @@ dependencies = [
 [[package]]
 name = "esp-metadata-generated"
 version = "0.5.1"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
+
+[[package]]
+name = "esp-metadata-generated"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "911aadae41ec99104efa865bd0b6e486b4b735999f9b571963748a46d16495ab"
 
 [[package]]
 name = "esp-phy"
 version = "0.2.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "document-features",
  "embassy-sync 0.8.0",
  "esp-config",
  "esp-hal",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.1",
  "esp-sync",
  "esp-wifi-sys-esp32c6",
  "esp32c6",
@@ -1685,9 +1699,10 @@ dependencies = [
 [[package]]
 name = "esp-println"
 version = "0.18.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "document-features",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.1",
  "esp-sync",
  "log",
  "portable-atomic",
@@ -1696,6 +1711,7 @@ dependencies = [
 [[package]]
 name = "esp-radio"
 version = "1.0.0-beta.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "allocator-api2",
  "bt-hci 0.9.0",
@@ -1712,7 +1728,7 @@ dependencies = [
  "esp-config",
  "esp-hal",
  "esp-hal-procmacros",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.1",
  "esp-phy",
  "esp-radio-rtos-driver",
  "esp-rom-sys",
@@ -1739,6 +1755,7 @@ dependencies = [
 [[package]]
 name = "esp-radio-rtos-driver"
 version = "0.4.1"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "esp-sync",
  "portable-atomic",
@@ -1747,6 +1764,7 @@ dependencies = [
 [[package]]
 name = "esp-riscv-rt"
 version = "0.15.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "document-features",
  "riscv",
@@ -1756,15 +1774,17 @@ dependencies = [
 [[package]]
 name = "esp-rom-sys"
 version = "0.1.5"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "document-features",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.1",
  "esp32c6",
 ]
 
 [[package]]
 name = "esp-rtos"
 version = "0.4.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "allocator-api2",
  "defmt",
@@ -1777,7 +1797,7 @@ dependencies = [
  "esp-config",
  "esp-hal",
  "esp-hal-procmacros",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.1",
  "esp-radio-rtos-driver",
  "esp-rom-sys",
  "esp-sync",
@@ -1789,12 +1809,13 @@ dependencies = [
 [[package]]
 name = "esp-storage"
 version = "0.10.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "document-features",
  "embedded-storage",
  "esp-hal",
  "esp-hal-procmacros",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.1",
  "esp-rom-sys",
  "esp-sync",
  "esp32c6",
@@ -1803,12 +1824,13 @@ dependencies = [
 [[package]]
 name = "esp-sync"
 version = "0.3.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "document-features",
  "embassy-sync 0.6.2",
  "embassy-sync 0.7.2",
  "embassy-sync 0.8.0",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.1",
  "riscv",
  "xtensa-lx",
 ]
@@ -3118,6 +3140,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "openthread"
 version = "0.4.0"
+source = "git+https://github.com/jan-xyz/openthread?rev=00d20c52efa8b5963ac6497a8aad3b042312dc4c#00d20c52efa8b5963ac6497a8aad3b042312dc4c"
 dependencies = [
  "bitflags 2.13.2",
  "embassy-futures",
@@ -3134,6 +3157,7 @@ dependencies = [
 [[package]]
 name = "openthread-sys"
 version = "0.4.0"
+source = "git+https://github.com/jan-xyz/openthread?rev=00d20c52efa8b5963ac6497a8aad3b042312dc4c#00d20c52efa8b5963ac6497a8aad3b042312dc4c"
 dependencies = [
  "anyhow",
  "bindgen 0.72.1",
@@ -3555,6 +3579,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-embassy"
 version = "0.1.0"
+source = "git+https://github.com/jan-xyz/rs-matter-embassy?rev=28dc310aa2d20629e735ad2379415080b8cde92c#28dc310aa2d20629e735ad2379415080b8cde92c"
 dependencies = [
  "bt-hci 0.10.1",
  "cfg-if",
@@ -4740,7 +4765,7 @@ dependencies = [
  "esp-backtrace",
  "esp-bootloader-esp-idf",
  "esp-hal",
- "esp-metadata-generated",
+ "esp-metadata-generated 0.5.3",
  "esp-println",
  "esp-radio",
  "esp-rtos",
@@ -4756,6 +4781,7 @@ dependencies = [
 [[package]]
 name = "xtensa-lx"
 version = "0.13.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "critical-section",
 ]
@@ -4763,6 +4789,7 @@ dependencies = [
 [[package]]
 name = "xtensa-lx-rt"
 version = "0.23.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "document-features",
  "xtensa-lx",
@@ -4772,6 +4799,7 @@ dependencies = [
 [[package]]
 name = "xtensa-lx-rt-proc-macros"
 version = "0.5.0"
+source = "git+https://github.com/jan-xyz/esp-hal?rev=701f196cbb3dd821f8deef49a226417ee6957d84#701f196cbb3dd821f8deef49a226417ee6957d84"
 dependencies = [
  "proc-macro2",
  "quote",
