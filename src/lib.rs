@@ -123,6 +123,15 @@ impl<const N: usize> DischargeHistory<N> {
     }
 }
 
+/// Whether the node may use the long LIT poll period: only when it has at least
+/// one fabric and every fabric has a registered ICD client. A controller that
+/// did not register (e.g. Home Assistant) expects SIT responsiveness and cannot
+/// reach a node that polls only every LIT period.
+pub fn every_fabric_has_icd_client(fabric_registrations: impl IntoIterator<Item = usize>) -> bool {
+    let mut fabrics = fabric_registrations.into_iter().peekable();
+    fabrics.peek().is_some() && fabrics.all(|registrations| registrations > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,6 +430,53 @@ mod tests {
 
             let result =
                 history.time_remaining_s(input_empty_mv, input_min_span_s, input_min_drop_mv);
+            assert_eq!(result, expected, "Failed case: '{name}'");
+        }
+    }
+
+    struct IcdClientTestCase {
+        name: &'static str,
+        input_fabric_registrations: &'static [usize],
+        expected: bool,
+    }
+
+    #[test]
+    fn test_every_fabric_has_icd_client() {
+        let test_cases = vec![
+            IcdClientTestCase {
+                name: "no fabrics stays in SIT",
+                input_fabric_registrations: &[],
+                expected: false,
+            },
+            IcdClientTestCase {
+                name: "single fabric without a client stays in SIT",
+                input_fabric_registrations: &[0],
+                expected: false,
+            },
+            IcdClientTestCase {
+                name: "single fabric with a client allows LIT",
+                input_fabric_registrations: &[1],
+                expected: true,
+            },
+            IcdClientTestCase {
+                name: "one fabric without a client stays in SIT",
+                input_fabric_registrations: &[1, 0],
+                expected: false,
+            },
+            IcdClientTestCase {
+                name: "every fabric with clients allows LIT",
+                input_fabric_registrations: &[2, 1],
+                expected: true,
+            },
+        ];
+
+        for IcdClientTestCase {
+            name,
+            input_fabric_registrations,
+            expected,
+        } in test_cases
+        {
+            let result = every_fabric_has_icd_client(input_fabric_registrations.iter().copied());
             assert_eq!(result, expected, "Failed case: '{name}'");
         }
     }

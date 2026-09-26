@@ -42,7 +42,7 @@ use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::decl::soil_measurement::ClusterHandler as _;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
 use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{
-    ClusterHandler as _, Icd, IcdMgmtHandler, IcdModeConfig, OperatingModeEnum,
+    ClusterHandler as _, Icd, IcdMgmtHandler, IcdModeConfig,
 };
 use rs_matter_embassy::matter::dm::devices::test::{
     DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
@@ -464,7 +464,7 @@ async fn main(_s: Spawner) {
             icd_stay_active_task(icd),
             commissioning_keepalive_task(stack.matter()),
             join(
-                icd_poll_mode_task(icd),
+                icd_poll_mode_task(icd, stack.matter()),
                 persist_reboot_count_task(stack.matter(), &kv)
             ),
         ));
@@ -635,20 +635,31 @@ async fn commissioning_keepalive_task(matter: &Matter<'_>) -> ! {
     }
 }
 
-/// Follows the controller's ICD setting: while an ICD client is registered
-/// (LIT, "Battery Saver") the idle poll period is long; otherwise (SIT,
-/// "Standard") it is short. Re-checks on registration changes and periodically
-/// as a fallback - the interaction model loads persisted registrations during
-/// startup, which can happen after this task first runs.
-async fn icd_poll_mode_task(icd: &Icd) -> ! {
+/// Picks the idle poll period: the long LIT period only while every fabric has
+/// a registered ICD client ([`soil_sensor_core::every_fabric_has_icd_client`]),
+/// the short SIT period otherwise. One registered controller must not make the
+/// node unreachable for another controller that did not register. Re-checks on
+/// registration changes and periodically as a fallback - the interaction model
+/// loads persisted registrations during startup, which can happen after this
+/// task first runs, and fabrics come and go without a registration change.
+async fn icd_poll_mode_task(icd: &Icd, matter: &Matter<'_>) -> ! {
     const RECHECK: Duration = Duration::from_secs(60);
 
     let mut applied: Option<u32> = None;
 
     loop {
-        let poll_period_ms = match icd.operating_mode() {
-            OperatingModeEnum::LIT => pins::THREAD_LIT_POLL_PERIOD_MS,
-            OperatingModeEnum::SIT => pins::THREAD_SIT_POLL_PERIOD_MS,
+        let lit = matter.with_state(|state| {
+            soil_sensor_core::every_fabric_has_icd_client(
+                state
+                    .fabrics
+                    .iter()
+                    .map(|fabric| icd.fabric_registrations_len(fabric.fab_idx())),
+            )
+        });
+        let poll_period_ms = if lit {
+            pins::THREAD_LIT_POLL_PERIOD_MS
+        } else {
+            pins::THREAD_SIT_POLL_PERIOD_MS
         };
 
         if applied != Some(poll_period_ms) {

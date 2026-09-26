@@ -60,17 +60,18 @@ pub const BUTTON_TRIPLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
 pub const BUTTON_FACTORY_RESET_HOLD: Duration = Duration::from_secs(10);
 pub const BUTTON_DEBOUNCE: Duration = Duration::from_millis(20);
 
-/// SED idle data-poll period for **SIT** ("Standard") mode, i.e. while no ICD
-/// client is registered and the controller expects responsiveness. The Matter
+/// SED idle data-poll period for **SIT** ("Standard") mode, i.e. while at least
+/// one fabric has no registered ICD client and its controller expects
+/// responsiveness. The Matter
 /// spec caps the SIT slow-poll interval at 15 s. It is also the advertised
 /// Session Idle Interval (`BASIC_INFO.sii`): the controller waits that long
 /// before it retries a message, and a message reaches this node only when it
 /// polls its parent.
 pub const THREAD_SIT_POLL_PERIOD_MS: u32 = 15_000;
 
-/// SED idle data-poll period for **LIT** ("Battery Saver") mode, i.e. while an
-/// ICD client is registered and its subscription is parked, so long silence is
-/// expected. Must stay below `THREAD_CHILD_TIMEOUT_S` and the advertised
+/// SED idle data-poll period for **LIT** ("Battery Saver") mode, i.e. while
+/// every fabric has a registered ICD client, so every controller waits for a
+/// Check-In and long silence is expected. Must stay below `THREAD_CHILD_TIMEOUT_S` and the advertised
 /// `ICD_MODE.idle_mode_duration_s`, or OpenThread clamps the effective period.
 pub const THREAD_LIT_POLL_PERIOD_MS: u32 = 900_000;
 
