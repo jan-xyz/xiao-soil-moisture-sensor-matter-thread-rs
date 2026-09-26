@@ -78,12 +78,16 @@ portable-atomic = "1"
 # Pinned to our fork's `matter-sed-icd` branch. Exposes the interaction model's
 # subscription table, which the app needs to send Matter ICD Check-In messages.
 rs-matter-stack = { git = "https://github.com/jan-xyz/rs-matter-stack", rev = "c22e5b11ab08f8117178611152c7c2bf3b823a9d" }
-esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+# Local `sed-rx-sleep` worktrees of the esp-hal and openthread forks: they add
+# `Ieee802154::stop_receive` and call it in `EspRadio::set_sleep`, so the SED
+# receiver is off between data polls. Switch to `git` + `rev` once pushed.
+openthread = { path = "/Users/jan.steinke/worktrees/openthread-sed-rx-sleep/openthread" }
+esp-hal = { path = "/Users/jan.steinke/worktrees/esp-hal-sed-rx-sleep/esp-hal" }
+esp-rtos = { path = "/Users/jan.steinke/worktrees/esp-hal-sed-rx-sleep/esp-rtos" }
+esp-alloc = { path = "/Users/jan.steinke/worktrees/esp-hal-sed-rx-sleep/esp-alloc" }
+esp-backtrace = { path = "/Users/jan.steinke/worktrees/esp-hal-sed-rx-sleep/esp-backtrace" }
+esp-println = { path = "/Users/jan.steinke/worktrees/esp-hal-sed-rx-sleep/esp-println" }
+esp-radio = { path = "/Users/jan.steinke/worktrees/esp-hal-sed-rx-sleep/esp-radio" }
+esp-storage = { path = "/Users/jan.steinke/worktrees/esp-hal-sed-rx-sleep/esp-storage" }
+esp-bootloader-esp-idf = { path = "/Users/jan.steinke/worktrees/esp-hal-sed-rx-sleep/esp-bootloader-esp-idf" }
+esp-metadata-generated = { path = "/Users/jan.steinke/worktrees/esp-hal-sed-rx-sleep/esp-metadata-generated" }
