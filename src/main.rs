@@ -12,7 +12,7 @@ use core::pin::pin;
 
 use embassy_embedded_hal::adapter::{BlockingAsync, YieldingAsync};
 use embassy_executor::Spawner;
-use embassy_futures::join::join5;
+use embassy_futures::join::{join, join5};
 use embassy_futures::select::{select, select3, Either3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -126,7 +126,8 @@ static SED: SedHandle = SedHandle::new(pins::THREAD_SIT_POLL_PERIOD_MS);
 const SOIL_ENDPOINT_ID: u16 = 1;
 
 const BASIC_INFO: BasicInfoConfig = BasicInfoConfig {
-    sai: Some(500),
+    sai: Some(pins::THREAD_ACTIVE_POLL_PERIOD_MS),
+    sii: Some(pins::THREAD_SIT_POLL_PERIOD_MS),
     ..TEST_DEV_DET
 };
 
@@ -186,12 +187,6 @@ async fn main(_s: Spawner) {
     esp_println::logger::init_logger_from_env();
     info!("Starting...");
 
-    // TEMPORARY diagnostic: which build is this?
-    #[cfg(feature = "light-sleep")]
-    info!("CPU light sleep: ENABLED");
-    #[cfg(not(feature = "light-sleep"))]
-    info!("CPU light sleep: DISABLED (build without --features light-sleep)");
-
     heap_allocator!(size: HEAP_SIZE - RECLAIMED_RAM);
     heap_allocator!(#[ram(reclaimed)] size: RECLAIMED_RAM);
 
@@ -199,22 +194,6 @@ async fn main(_s: Spawner) {
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
-    // Automatic CPU light sleep: whenever no task is ready and no
-    // `esp_hal::rtc_cntl::WakeLock` is held, the chip sleeps until the next
-    // scheduled wakeup. This only pays off once the Thread radio is a sleepy
-    // end device (see `ThreadSedConfig` below) - an always-listening radio
-    // holds wake locks and wakes the chip continuously. NB: light sleep breaks
-    // USB-Serial/JTAG logging, so measure over the UART pins.
-    #[cfg(feature = "light-sleep")]
-    let sleep = esp_rtos::sleep::configure(peripherals.LPWR);
-
-    #[cfg(feature = "light-sleep")]
-    esp_rtos::start_with_idle_hook(
-        timg0.timer0,
-        peripherals.FROM_CPU_INTR0,
-        sleep.light_sleep_hook,
-    );
-    #[cfg(not(feature = "light-sleep"))]
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
     // Antenna/RF-switch setup, driven once at boot and held for the
@@ -482,7 +461,10 @@ async fn main(_s: Spawner) {
             check_in_task(icd, stack.matter(), &crypto, stack.subscriptions(), &kv),
             icd_stay_active_task(icd),
             commissioning_keepalive_task(stack.matter()),
-            icd_poll_mode_task(icd),
+            join(
+                icd_poll_mode_task(icd),
+                persist_reboot_count_task(stack.matter(), &kv)
+            ),
         ));
 
         match select3(matter, FACTORY_RESET.wait(), app).await {
@@ -521,19 +503,6 @@ async fn dispatch_button_events() -> ! {
 async fn periodic_ticker() -> ! {
     loop {
         Timer::after(SAMPLE_PERIOD).await;
-
-        // TEMPORARY diagnostics: `wakeup cause` is empty unless the CPU entered
-        // light sleep; `wake lock active` says whether something holds a
-        // WakeLock; `uptime` resets on reboot, so a long capture shows restarts.
-        info!(
-            "wakeup cause: {:?}, wake lock active: {}, uptime: {}s",
-            esp_hal::system::wakeup_cause(),
-            esp_hal::rtc_cntl::WakeLock::is_active(),
-            esp_hal::time::Instant::now()
-                .duration_since_epoch()
-                .as_secs(),
-        );
-
         SAMPLE_CHANNEL.send(SampleRequest::Silent).await;
     }
 }
@@ -623,6 +592,18 @@ impl<K: KvBlobStoreAccess> KvBlobStore for AccessStore<'_, K> {
 
     fn remove(&mut self, key: u16, _buf: &mut [u8]) -> Result<(), Error> {
         self.0.access(|store, scratch| store.remove(key, scratch))
+    }
+}
+
+/// Records this boot in the persisted `RebootCount` once the node has run for
+/// [`pins::REBOOT_COUNT_HEALTHY_AFTER`]. `Matter::startup` only loads the
+/// count, and writing it later keeps a boot loop from spending flash writes.
+async fn persist_reboot_count_task<K: KvBlobStoreAccess>(matter: &Matter<'_>, kv: K) {
+    Timer::after(pins::REBOOT_COUNT_HEALTHY_AFTER).await;
+
+    match matter.persist_reboot_count(kv) {
+        Ok(()) => info!("Reboot count {} persisted", matter.reboot_count()),
+        Err(e) => warn!("Reboot count persist failed: {e:?}"),
     }
 }
 

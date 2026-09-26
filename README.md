@@ -43,7 +43,7 @@ deliberately does not match every feature of the C++ original. See
   the longer LIT period (`THREAD_LIT_POLL_PERIOD_MS`) following the controller's
   ICD setting, and shortening to `THREAD_ACTIVE_POLL_PERIOD_MS` for
   `THREAD_ACTIVE_HOLD` after a button press, an ICD stay-active request, or while
-  commissioning. Optional CPU light sleep (`--features light-sleep`).
+  commissioning.
 - LIT ICD: hosts the Matter ICD Management cluster on endpoint 0 and
   periodically sweeps registered clients with a Check-In when their subscription
   has lapsed (`CHECK_IN_PERIOD`).
