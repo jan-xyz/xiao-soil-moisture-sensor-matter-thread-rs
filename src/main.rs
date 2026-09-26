@@ -689,6 +689,19 @@ where
     loop {
         Timer::after(pins::CHECK_IN_PERIOD).await;
 
+        // `send_check_in` does not report whom it messaged; this is the same
+        // "no live subscription" test it applies to each registered client.
+        icd.with_registrations(|clients| {
+            for client in clients {
+                if !subscriptions.has_subscription_for(client.fab_idx, client.monitored_subject) {
+                    info!(
+                        "ICD Check-In to node {:016X}: no live subscription for monitored subject {:016X}",
+                        client.check_in_node_id, client.monitored_subject
+                    );
+                }
+            }
+        });
+
         match icd
             .send_check_in(matter, crypto, subscriptions, AccessStore(&kv), &mut buf)
             .await
