@@ -524,6 +524,10 @@ where
 {
     let leds = LED_CHANNEL.sender();
     let requests = SAMPLE_CHANNEL.receiver();
+    let mut discharge = soil_sensor_core::DischargeHistory::<{ pins::BATTERY_HISTORY_LEN }>::new(
+        pins::BATTERY_HISTORY_INTERVAL_SECS,
+        pins::BATTERY_REPLACED_RISE_MV,
+    );
 
     loop {
         let request = requests.receive().await;
@@ -560,7 +564,13 @@ where
             pins::BATTERY_EMPTY_MV,
             pins::BATTERY_FULL_MV,
         );
-        power_handler.report(percent, mv);
+        discharge.push(embassy_time::Instant::now().as_secs() as u32, mv as i32);
+        let time_remaining_s = discharge.time_remaining_s(
+            pins::BATTERY_EMPTY_MV,
+            pins::BATTERY_TIME_REMAINING_MIN_SPAN_SECS,
+            pins::BATTERY_TIME_REMAINING_MIN_DROP_MV,
+        );
+        power_handler.report(percent, mv, time_remaining_s);
     }
 }
 

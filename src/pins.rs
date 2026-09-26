@@ -34,6 +34,18 @@ pub const SOIL_CAL_MIN_SPAN_MV: i32 = 200;
 pub const BATTERY_EMPTY_MV: i32 = 1000;
 pub const BATTERY_FULL_MV: i32 = 1500;
 
+/// `BatTimeRemaining` estimate: one voltage sample per
+/// [`BATTERY_HISTORY_INTERVAL_SECS`], [`BATTERY_HISTORY_LEN`] samples (24 h)
+/// in the fit. No estimate until the samples span
+/// [`BATTERY_TIME_REMAINING_MIN_SPAN_SECS`] and the fitted voltage fell by
+/// [`BATTERY_TIME_REMAINING_MIN_DROP_MV`], because a shorter or flatter trend is
+/// mostly ADC noise. A rise of [`BATTERY_REPLACED_RISE_MV`] means a new cell.
+pub const BATTERY_HISTORY_INTERVAL_SECS: u32 = 900;
+pub const BATTERY_HISTORY_LEN: usize = 96;
+pub const BATTERY_TIME_REMAINING_MIN_SPAN_SECS: u32 = 4 * 3_600;
+pub const BATTERY_TIME_REMAINING_MIN_DROP_MV: i32 = 10;
+pub const BATTERY_REPLACED_RISE_MV: i32 = 100;
+
 /// Only report a new moisture/battery reading when it moved enough to be a
 /// real trend, so ADC jitter does not wake the Thread radio with a report.
 pub const SOIL_REPORT_DELTA_PERCENT: u8 = 2;

@@ -26,8 +26,9 @@ deliberately does not match every feature of the C++ original. See
   same shape as `rs-matter-embassy`'s `light_thread_coex` example).
 - `SoilMeasurement` cluster reporting moisture % (hand-written handler - see
   below).
-- Battery-shaped `PowerSource` cluster reporting battery % and voltage
-  (hand-written handler - see below).
+- Battery-shaped `PowerSource` cluster reporting battery %, voltage and an
+  estimated time remaining from the voltage trend over the last 24 h, available
+  after 4 h of uptime (hand-written handler - see below).
 - Button: single press samples now, triple click starts the dry/wet
   calibration flow, a 10 s hold factory-resets (erases the Matter fabric and
   reboots).
