@@ -149,7 +149,7 @@ const ROOT_ENDPOINT: Endpoint<'static> = Endpoint {
 /// LITS feature and flips between SIT and LIT as clients register/unregister.
 const ICD_MODE: IcdModeConfig = IcdModeConfig {
     idle_mode_duration_s: 3_600,
-    active_mode_duration_ms: 1_000,
+    active_mode_duration_ms: pins::THREAD_FAST_HOLD_MS,
     active_mode_threshold_ms: 300,
     user_active_mode_trigger_hint: 0,
     user_active_mode_trigger_instruction: "",
@@ -433,6 +433,8 @@ async fn main(_s: Spawner) {
                 ThreadSedConfig {
                     active_poll_period_ms: pins::THREAD_ACTIVE_POLL_PERIOD_MS,
                     active_hold: pins::THREAD_ACTIVE_HOLD,
+                    fast_poll_period_ms: pins::THREAD_FAST_POLL_PERIOD_MS,
+                    fast_hold: Duration::from_millis(pins::THREAD_FAST_HOLD_MS as u64),
                     child_timeout_s: Some(pins::THREAD_CHILD_TIMEOUT_S),
                 },
                 &SED,
@@ -550,7 +552,7 @@ where
             calibration.dry_mv(),
             calibration.wet_mv(),
         );
-        soil_handler.report(percent);
+        let soil_reported = soil_handler.report(percent);
         if matches!(request, SampleRequest::ShowLed) {
             leds.send(LedCommand::ClassifyMoisture {
                 moisture_percent: percent,
@@ -570,7 +572,11 @@ where
             pins::BATTERY_TIME_REMAINING_MIN_SPAN_SECS,
             pins::BATTERY_TIME_REMAINING_MIN_DROP_MV,
         );
-        power_handler.report(percent, mv, time_remaining_s);
+        let battery_reported = power_handler.report(percent, mv, time_remaining_s);
+
+        if soil_reported || battery_reported {
+            SED.request_fast_polls();
+        }
     }
 }
 
