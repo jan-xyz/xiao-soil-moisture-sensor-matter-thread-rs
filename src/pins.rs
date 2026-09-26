@@ -49,11 +49,12 @@ pub const BUTTON_FACTORY_RESET_HOLD: Duration = Duration::from_secs(10);
 pub const BUTTON_DEBOUNCE: Duration = Duration::from_millis(20);
 
 /// SED idle data-poll period for **SIT** ("Standard") mode, i.e. while no ICD
-/// client is registered and the controller expects responsiveness. Deliberately
-/// aligned with [`SAMPLE_PERIOD_SECS`]: the only useful wake-up is the uplink
-/// report (sent when a reading moved), so polling faster than we sample buys
-/// nothing.
-pub const THREAD_SIT_POLL_PERIOD_MS: u32 = SAMPLE_PERIOD_SECS * 1_000;
+/// client is registered and the controller expects responsiveness. The Matter
+/// spec caps the SIT slow-poll interval at 15 s. It is also the advertised
+/// Session Idle Interval (`BASIC_INFO.sii`): the controller waits that long
+/// before it retries a message, and a message reaches this node only when it
+/// polls its parent.
+pub const THREAD_SIT_POLL_PERIOD_MS: u32 = 15_000;
 
 /// SED idle data-poll period for **LIT** ("Battery Saver") mode, i.e. while an
 /// ICD client is registered and its subscription is parked, so long silence is
@@ -63,7 +64,8 @@ pub const THREAD_LIT_POLL_PERIOD_MS: u32 = 900_000;
 
 /// SED active data-poll period (ms), used for [`THREAD_ACTIVE_HOLD`] after boot
 /// or a local button press / ICD stay-active request, so the controller's
-/// response lands promptly.
+/// response lands promptly. It is also the advertised Session Active Interval
+/// (`BASIC_INFO.sai`), for the same reason as [`THREAD_SIT_POLL_PERIOD_MS`].
 pub const THREAD_ACTIVE_POLL_PERIOD_MS: u32 = 5_000;
 
 /// How long the SED stays in the active poll period after the last nudge.

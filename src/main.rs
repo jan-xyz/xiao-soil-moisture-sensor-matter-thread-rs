@@ -126,7 +126,8 @@ static SED: SedHandle = SedHandle::new(pins::THREAD_SIT_POLL_PERIOD_MS);
 const SOIL_ENDPOINT_ID: u16 = 1;
 
 const BASIC_INFO: BasicInfoConfig = BasicInfoConfig {
-    sai: Some(500),
+    sai: Some(pins::THREAD_ACTIVE_POLL_PERIOD_MS),
+    sii: Some(pins::THREAD_SIT_POLL_PERIOD_MS),
     ..TEST_DEV_DET
 };
 
