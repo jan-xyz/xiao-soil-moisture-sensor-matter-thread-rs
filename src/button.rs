@@ -9,9 +9,6 @@
 //!   single press  -> sample now + moisture status blink
 //!   triple press  -> dry/wet calibration flow
 //!   10 s hold     -> factory reset (red warning blink)
-//!
-//! LIT ICD "User Active Mode Trigger" (every press wakes the sleepy-end-device
-//! radio) is out of scope for this port - see the plan's ICD/light-sleep gap.
 
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;

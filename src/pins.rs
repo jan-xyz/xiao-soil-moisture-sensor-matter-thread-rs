@@ -34,6 +34,18 @@ pub const SOIL_CAL_MIN_SPAN_MV: i32 = 200;
 pub const BATTERY_EMPTY_MV: i32 = 1000;
 pub const BATTERY_FULL_MV: i32 = 1500;
 
+/// `BatTimeRemaining` estimate: one voltage sample per
+/// [`BATTERY_HISTORY_INTERVAL_SECS`], [`BATTERY_HISTORY_LEN`] samples (24 h)
+/// in the fit. No estimate until the samples span
+/// [`BATTERY_TIME_REMAINING_MIN_SPAN_SECS`] and the fitted voltage fell by
+/// [`BATTERY_TIME_REMAINING_MIN_DROP_MV`], because a shorter or flatter trend is
+/// mostly ADC noise. A rise of [`BATTERY_REPLACED_RISE_MV`] means a new cell.
+pub const BATTERY_HISTORY_INTERVAL_SECS: u32 = 900;
+pub const BATTERY_HISTORY_LEN: usize = 96;
+pub const BATTERY_TIME_REMAINING_MIN_SPAN_SECS: u32 = 4 * 3_600;
+pub const BATTERY_TIME_REMAINING_MIN_DROP_MV: i32 = 10;
+pub const BATTERY_REPLACED_RISE_MV: i32 = 100;
+
 /// Only report a new moisture/battery reading when it moved enough to be a
 /// real trend, so ADC jitter does not wake the Thread radio with a report.
 pub const SOIL_REPORT_DELTA_PERCENT: u8 = 2;
@@ -48,26 +60,40 @@ pub const BUTTON_TRIPLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
 pub const BUTTON_FACTORY_RESET_HOLD: Duration = Duration::from_secs(10);
 pub const BUTTON_DEBOUNCE: Duration = Duration::from_millis(20);
 
-/// SED idle data-poll period for **SIT** ("Standard") mode, i.e. while no ICD
-/// client is registered and the controller expects responsiveness. Deliberately
-/// aligned with [`SAMPLE_PERIOD_SECS`]: the only useful wake-up is the uplink
-/// report (sent when a reading moved), so polling faster than we sample buys
-/// nothing.
-pub const THREAD_SIT_POLL_PERIOD_MS: u32 = SAMPLE_PERIOD_SECS * 1_000;
+/// SED idle data-poll period for **SIT** ("Standard") mode, i.e. while at least
+/// one fabric has no registered ICD client and its controller expects
+/// responsiveness. The Matter
+/// spec caps the SIT slow-poll interval at 15 s. It is also the advertised
+/// Session Idle Interval (`BASIC_INFO.sii`): the controller waits that long
+/// before it retries a message, and a message reaches this node only when it
+/// polls its parent.
+pub const THREAD_SIT_POLL_PERIOD_MS: u32 = 15_000;
 
-/// SED idle data-poll period for **LIT** ("Battery Saver") mode, i.e. while an
-/// ICD client is registered and its subscription is parked, so long silence is
-/// expected. Must stay below `THREAD_CHILD_TIMEOUT_S` and the advertised
+/// SED idle data-poll period for **LIT** ("Battery Saver") mode, i.e. while
+/// every fabric has a registered ICD client, so every controller waits for a
+/// Check-In and long silence is expected. Must stay below `THREAD_CHILD_TIMEOUT_S` and the advertised
 /// `ICD_MODE.idle_mode_duration_s`, or OpenThread clamps the effective period.
 pub const THREAD_LIT_POLL_PERIOD_MS: u32 = 900_000;
 
 /// SED active data-poll period (ms), used for [`THREAD_ACTIVE_HOLD`] after boot
 /// or a local button press / ICD stay-active request, so the controller's
-/// response lands promptly.
+/// response lands promptly. It is also the advertised Session Active Interval
+/// (`BASIC_INFO.sai`), for the same reason as [`THREAD_SIT_POLL_PERIOD_MS`].
 pub const THREAD_ACTIVE_POLL_PERIOD_MS: u32 = 5_000;
 
 /// How long the SED stays in the active poll period after the last nudge.
 pub const THREAD_ACTIVE_HOLD: Duration = Duration::from_secs(30);
+
+/// SED poll period (ms) for a short burst after the device sends any Matter
+/// message, so the controller's reply is fetched from the parent at once
+/// instead of after a retransmission. Matches the connectedhomeip default ICD
+/// fast-poll interval.
+pub const THREAD_FAST_POLL_PERIOD_MS: u32 = 200;
+
+/// How long the fast-poll burst lasts after the last sent message (ms). It is
+/// also the advertised Matter ICD active-mode duration
+/// (`ICD_MODE.active_mode_duration_ms`), because the burst is that active mode.
+pub const THREAD_FAST_HOLD_MS: u32 = 1_000;
 
 /// Background sampling cadence (seconds). The measurement loop wakes the CPU
 /// this often regardless of the radio's poll schedule.
@@ -93,3 +119,7 @@ pub const CHECK_IN_PERIOD: Duration = Duration::from_secs(300);
 
 /// Scratch buffer for building a Check-In message.
 pub const CHECK_IN_BUF: usize = 256;
+
+/// How long a boot must run before it counts in the persisted Matter
+/// `RebootCount` (General Diagnostics cluster).
+pub const REBOOT_COUNT_HEALTHY_AFTER: Duration = Duration::from_secs(60);

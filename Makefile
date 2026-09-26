@@ -14,7 +14,7 @@ flash:
 flash-release:
 	PATH="/opt/homebrew/opt/llvm/bin:$(PATH)" \
 	CC=/opt/homebrew/opt/llvm/bin/clang CXX=/opt/homebrew/opt/llvm/bin/clang++ \
-	cargo run --release --features light-sleep
+	cargo run --release
 
 # Attach to an already-flashed board without reflashing.
 monitor:

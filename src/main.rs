@@ -12,7 +12,7 @@ use core::pin::pin;
 
 use embassy_embedded_hal::adapter::{BlockingAsync, YieldingAsync};
 use embassy_executor::Spawner;
-use embassy_futures::join::join5;
+use embassy_futures::join::{join, join5};
 use embassy_futures::select::{select, select3, Either3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -42,7 +42,7 @@ use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::decl::soil_measurement::ClusterHandler as _;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
 use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{
-    ClusterHandler as _, Icd, IcdMgmtHandler, IcdModeConfig, OperatingModeEnum,
+    ClusterHandler as _, Icd, IcdMgmtHandler, IcdModeConfig,
 };
 use rs_matter_embassy::matter::dm::devices::test::{
     DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
@@ -126,7 +126,8 @@ static SED: SedHandle = SedHandle::new(pins::THREAD_SIT_POLL_PERIOD_MS);
 const SOIL_ENDPOINT_ID: u16 = 1;
 
 const BASIC_INFO: BasicInfoConfig = BasicInfoConfig {
-    sai: Some(500),
+    sai: Some(pins::THREAD_ACTIVE_POLL_PERIOD_MS),
+    sii: Some(pins::THREAD_SIT_POLL_PERIOD_MS),
     ..TEST_DEV_DET
 };
 
@@ -148,7 +149,7 @@ const ROOT_ENDPOINT: Endpoint<'static> = Endpoint {
 /// LITS feature and flips between SIT and LIT as clients register/unregister.
 const ICD_MODE: IcdModeConfig = IcdModeConfig {
     idle_mode_duration_s: 3_600,
-    active_mode_duration_ms: 1_000,
+    active_mode_duration_ms: pins::THREAD_FAST_HOLD_MS,
     active_mode_threshold_ms: 300,
     user_active_mode_trigger_hint: 0,
     user_active_mode_trigger_instruction: "",
@@ -186,12 +187,6 @@ async fn main(_s: Spawner) {
     esp_println::logger::init_logger_from_env();
     info!("Starting...");
 
-    // TEMPORARY diagnostic: which build is this?
-    #[cfg(feature = "light-sleep")]
-    info!("CPU light sleep: ENABLED");
-    #[cfg(not(feature = "light-sleep"))]
-    info!("CPU light sleep: DISABLED (build without --features light-sleep)");
-
     heap_allocator!(size: HEAP_SIZE - RECLAIMED_RAM);
     heap_allocator!(#[ram(reclaimed)] size: RECLAIMED_RAM);
 
@@ -199,22 +194,6 @@ async fn main(_s: Spawner) {
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
-    // Automatic CPU light sleep: whenever no task is ready and no
-    // `esp_hal::rtc_cntl::WakeLock` is held, the chip sleeps until the next
-    // scheduled wakeup. This only pays off once the Thread radio is a sleepy
-    // end device (see `ThreadSedConfig` below) - an always-listening radio
-    // holds wake locks and wakes the chip continuously. NB: light sleep breaks
-    // USB-Serial/JTAG logging, so measure over the UART pins.
-    #[cfg(feature = "light-sleep")]
-    let sleep = esp_rtos::sleep::configure(peripherals.LPWR);
-
-    #[cfg(feature = "light-sleep")]
-    esp_rtos::start_with_idle_hook(
-        timg0.timer0,
-        peripherals.FROM_CPU_INTR0,
-        sleep.light_sleep_hook,
-    );
-    #[cfg(not(feature = "light-sleep"))]
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
     // Antenna/RF-switch setup, driven once at boot and held for the
@@ -454,6 +433,8 @@ async fn main(_s: Spawner) {
                 ThreadSedConfig {
                     active_poll_period_ms: pins::THREAD_ACTIVE_POLL_PERIOD_MS,
                     active_hold: pins::THREAD_ACTIVE_HOLD,
+                    fast_poll_period_ms: pins::THREAD_FAST_POLL_PERIOD_MS,
+                    fast_hold: Duration::from_millis(pins::THREAD_FAST_HOLD_MS as u64),
                     child_timeout_s: Some(pins::THREAD_CHILD_TIMEOUT_S),
                 },
                 &SED,
@@ -482,7 +463,10 @@ async fn main(_s: Spawner) {
             check_in_task(icd, stack.matter(), &crypto, stack.subscriptions(), &kv),
             icd_stay_active_task(icd),
             commissioning_keepalive_task(stack.matter()),
-            icd_poll_mode_task(icd),
+            join(
+                icd_poll_mode_task(icd, stack.matter()),
+                persist_reboot_count_task(stack.matter(), &kv)
+            ),
         ));
 
         match select3(matter, FACTORY_RESET.wait(), app).await {
@@ -521,19 +505,6 @@ async fn dispatch_button_events() -> ! {
 async fn periodic_ticker() -> ! {
     loop {
         Timer::after(SAMPLE_PERIOD).await;
-
-        // TEMPORARY diagnostics: `wakeup cause` is empty unless the CPU entered
-        // light sleep; `wake lock active` says whether something holds a
-        // WakeLock; `uptime` resets on reboot, so a long capture shows restarts.
-        info!(
-            "wakeup cause: {:?}, wake lock active: {}, uptime: {}s",
-            esp_hal::system::wakeup_cause(),
-            esp_hal::rtc_cntl::WakeLock::is_active(),
-            esp_hal::time::Instant::now()
-                .duration_since_epoch()
-                .as_secs(),
-        );
-
         SAMPLE_CHANNEL.send(SampleRequest::Silent).await;
     }
 }
@@ -555,6 +526,10 @@ where
 {
     let leds = LED_CHANNEL.sender();
     let requests = SAMPLE_CHANNEL.receiver();
+    let mut discharge = soil_sensor_core::DischargeHistory::<{ pins::BATTERY_HISTORY_LEN }>::new(
+        pins::BATTERY_HISTORY_INTERVAL_SECS,
+        pins::BATTERY_REPLACED_RISE_MV,
+    );
 
     loop {
         let request = requests.receive().await;
@@ -591,7 +566,13 @@ where
             pins::BATTERY_EMPTY_MV,
             pins::BATTERY_FULL_MV,
         );
-        power_handler.report(percent, mv);
+        discharge.push(embassy_time::Instant::now().as_secs() as u32, mv as i32);
+        let time_remaining_s = discharge.time_remaining_s(
+            pins::BATTERY_EMPTY_MV,
+            pins::BATTERY_TIME_REMAINING_MIN_SPAN_SECS,
+            pins::BATTERY_TIME_REMAINING_MIN_DROP_MV,
+        );
+        power_handler.report(percent, mv, time_remaining_s);
     }
 }
 
@@ -626,6 +607,18 @@ impl<K: KvBlobStoreAccess> KvBlobStore for AccessStore<'_, K> {
     }
 }
 
+/// Records this boot in the persisted `RebootCount` once the node has run for
+/// [`pins::REBOOT_COUNT_HEALTHY_AFTER`]. `Matter::startup` only loads the
+/// count, and writing it later keeps a boot loop from spending flash writes.
+async fn persist_reboot_count_task<K: KvBlobStoreAccess>(matter: &Matter<'_>, kv: K) {
+    Timer::after(pins::REBOOT_COUNT_HEALTHY_AFTER).await;
+
+    match matter.persist_reboot_count(kv) {
+        Ok(()) => info!("Reboot count {} persisted", matter.reboot_count()),
+        Err(e) => warn!("Reboot count persist failed: {e:?}"),
+    }
+}
+
 /// Keeps the SED responsive while the node is uncommissioned or a commissioning
 /// window is open. Commissioning reads/writes run over the operational network
 /// *before* the fabric exists, so letting the poll period decay to idle during
@@ -642,20 +635,31 @@ async fn commissioning_keepalive_task(matter: &Matter<'_>) -> ! {
     }
 }
 
-/// Follows the controller's ICD setting: while an ICD client is registered
-/// (LIT, "Battery Saver") the idle poll period is long; otherwise (SIT,
-/// "Standard") it is short. Re-checks on registration changes and periodically
-/// as a fallback - the interaction model loads persisted registrations during
-/// startup, which can happen after this task first runs.
-async fn icd_poll_mode_task(icd: &Icd) -> ! {
+/// Picks the idle poll period: the long LIT period only while every fabric has
+/// a registered ICD client ([`soil_sensor_core::every_fabric_has_icd_client`]),
+/// the short SIT period otherwise. One registered controller must not make the
+/// node unreachable for another controller that did not register. Re-checks on
+/// registration changes and periodically as a fallback - the interaction model
+/// loads persisted registrations during startup, which can happen after this
+/// task first runs, and fabrics come and go without a registration change.
+async fn icd_poll_mode_task(icd: &Icd, matter: &Matter<'_>) -> ! {
     const RECHECK: Duration = Duration::from_secs(60);
 
     let mut applied: Option<u32> = None;
 
     loop {
-        let poll_period_ms = match icd.operating_mode() {
-            OperatingModeEnum::LIT => pins::THREAD_LIT_POLL_PERIOD_MS,
-            OperatingModeEnum::SIT => pins::THREAD_SIT_POLL_PERIOD_MS,
+        let lit = matter.with_state(|state| {
+            soil_sensor_core::every_fabric_has_icd_client(
+                state
+                    .fabrics
+                    .iter()
+                    .map(|fabric| icd.fabric_registrations_len(fabric.fab_idx())),
+            )
+        });
+        let poll_period_ms = if lit {
+            pins::THREAD_LIT_POLL_PERIOD_MS
+        } else {
+            pins::THREAD_SIT_POLL_PERIOD_MS
         };
 
         if applied != Some(poll_period_ms) {
@@ -697,6 +701,19 @@ where
 
     loop {
         Timer::after(pins::CHECK_IN_PERIOD).await;
+
+        // `send_check_in` does not report whom it messaged; this is the same
+        // "no live subscription" test it applies to each registered client.
+        icd.with_registrations(|clients| {
+            for client in clients {
+                if !subscriptions.has_subscription_for(client.fab_idx, client.monitored_subject) {
+                    info!(
+                        "ICD Check-In to node {:016X}: no live subscription for monitored subject {:016X}",
+                        client.check_in_node_id, client.monitored_subject
+                    );
+                }
+            }
+        });
 
         match icd
             .send_check_in(matter, crypto, subscriptions, AccessStore(&kv), &mut buf)

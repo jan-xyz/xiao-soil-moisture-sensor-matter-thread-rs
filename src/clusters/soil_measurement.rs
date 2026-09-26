@@ -75,18 +75,19 @@ impl<'a> SoilMeasurementHandler<'a> {
     }
 
     /// Called by the sampling loop with a freshly measured percent. Only
-    /// reports (bumps the dataver and wakes `run()` to push a subscription
-    /// update) when the reading moved by at least `SOIL_REPORT_DELTA_PERCENT`,
-    /// so ADC jitter does not wake the Thread radio.
+    /// reports (stores the value, bumps the dataver and wakes `run()` to push a
+    /// subscription update) when the reading moved by at least
+    /// `SOIL_REPORT_DELTA_PERCENT` since the last report, so ADC jitter does
+    /// not wake the Thread radio but a slow trend still reaches the controller.
     pub fn report(&self, percent: u8) {
-        let should_report = match self.value.get() {
-            Some(previous) => previous.abs_diff(percent) >= SOIL_REPORT_DELTA_PERCENT,
-            None => true,
-        };
-
-        self.value.set(percent);
+        let should_report = soil_sensor_core::should_report(
+            self.value.get().map(u32::from),
+            u32::from(percent),
+            u32::from(SOIL_REPORT_DELTA_PERCENT),
+        );
 
         if should_report {
+            self.value.set(percent);
             self.dataver.changed();
             self.changed.signal(());
         }

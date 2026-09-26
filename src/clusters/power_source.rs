@@ -13,7 +13,9 @@
 //! mandatory (confirmed against `connectedhomeip`'s
 //! `data_model/1.5/clusters/PowerSourceCluster.xml`). `BatPercentRemaining`
 //! and `BatVoltage` stay optional under `BATTERY` alone, but this is the
-//! whole reason to host the cluster, so they're claimed too.
+//! whole reason to host the cluster, so they're claimed too. `BatTimeRemaining`
+//! is an estimate from the voltage trend
+//! ([`soil_sensor_core::DischargeHistory`]); the board has no current sensor.
 
 use core::cell::RefCell;
 
@@ -42,6 +44,7 @@ pub const CLUSTER: Cluster<'static> = FULL_CLUSTER
         | AttributeId::BatReplaceability
         | AttributeId::BatPercentRemaining
         | AttributeId::BatVoltage
+        | AttributeId::BatTimeRemaining
     ))
     .with_cmds(with!());
 
@@ -53,9 +56,10 @@ const CHARGE_LEVEL_CRITICAL_BELOW_PERCENT: u8 = 5;
 struct Reading {
     percent: Option<u8>,
     rest_mv: Option<u32>,
+    time_remaining_s: Option<u32>,
 }
 
-/// The last-reported battery reading, or `None`s if never sampled. Shared
+/// The last-reported battery reading, or `None`s if never reported. Shared
 /// between the sampling loop (writer) and the cluster handler (reader).
 pub struct BatteryCell(Mutex<CriticalSectionRawMutex, RefCell<Reading>>);
 
@@ -64,6 +68,7 @@ impl BatteryCell {
         Self(Mutex::new(RefCell::new(Reading {
             percent: None,
             rest_mv: None,
+            time_remaining_s: None,
         })))
     }
 
@@ -73,15 +78,17 @@ impl BatteryCell {
             Reading {
                 percent: reading.percent,
                 rest_mv: reading.rest_mv,
+                time_remaining_s: reading.time_remaining_s,
             }
         })
     }
 
-    fn set(&self, percent: u8, rest_mv: u32) {
+    fn set(&self, percent: u8, rest_mv: u32, time_remaining_s: Option<u32>) {
         self.0.lock(|cell| {
             *cell.borrow_mut() = Reading {
                 percent: Some(percent),
                 rest_mv: Some(rest_mv),
+                time_remaining_s,
             }
         });
     }
@@ -114,20 +121,28 @@ impl<'a> PowerSourceHandler<'a> {
         }
     }
 
-    /// Called by the sampling loop with a freshly measured resting voltage
-    /// and derived percent. Only reports (bumps the dataver and wakes
-    /// `run()` to push a subscription update) when the voltage moved by at
-    /// least `BATTERY_REPORT_DELTA_MV`, so ADC jitter does not wake the
-    /// Thread radio.
-    pub fn report(&self, percent: u8, rest_mv: u32) {
-        let should_report = match self.reading.get().rest_mv {
-            Some(previous_mv) => previous_mv.abs_diff(rest_mv) >= BATTERY_REPORT_DELTA_MV as u32,
-            None => true,
-        };
+    /// Called by the sampling loop with a freshly measured resting voltage,
+    /// the derived percent and the estimated time remaining. Only reports
+    /// (stores the reading, bumps the dataver and wakes `run()` to push a
+    /// subscription update) when the voltage moved by at least
+    /// `BATTERY_REPORT_DELTA_MV` since the last report, or when an estimate
+    /// becomes available or unavailable, so ADC jitter does not wake the
+    /// Thread radio but a slow discharge still reaches the controller.
+    pub fn report(&self, percent: u8, rest_mv: u32, time_remaining_s: Option<u32>) {
+        let reported = self.reading.get();
+        let should_report = soil_sensor_core::should_report(
+            reported.rest_mv,
+            rest_mv,
+            BATTERY_REPORT_DELTA_MV as u32,
+        ) || reported.time_remaining_s.is_some() != time_remaining_s.is_some();
 
-        self.reading.set(percent, rest_mv);
+        if should_report {
+            self.reading.set(percent, rest_mv, time_remaining_s);
+        }
 
-        log::info!("Battery: {percent}% ({rest_mv} mV, reported change: {should_report})");
+        log::info!(
+            "Battery: {percent}% ({rest_mv} mV, time remaining: {time_remaining_s:?} s, reported change: {should_report})"
+        );
 
         if should_report {
             self.dataver.changed();
@@ -159,6 +174,11 @@ impl ClusterHandler for PowerSourceHandler<'_> {
                 self.endpoint_id,
                 Self::CLUSTER.id,
                 AttributeId::BatVoltage as _,
+            );
+            ctx.notify_attr_changed(
+                self.endpoint_id,
+                Self::CLUSTER.id,
+                AttributeId::BatTimeRemaining as _,
             );
         }
     }
@@ -206,6 +226,13 @@ impl ClusterHandler for PowerSourceHandler<'_> {
     fn bat_voltage(&self, _ctx: impl ReadContext) -> Result<Nullable<u32>, Error> {
         Ok(match self.reading.get().rest_mv {
             Some(mv) => Nullable::some(mv),
+            None => Nullable::none(),
+        })
+    }
+
+    fn bat_time_remaining(&self, _ctx: impl ReadContext) -> Result<Nullable<u32>, Error> {
+        Ok(match self.reading.get().time_remaining_s {
+            Some(time_remaining_s) => Nullable::some(time_remaining_s),
             None => Nullable::none(),
         })
     }

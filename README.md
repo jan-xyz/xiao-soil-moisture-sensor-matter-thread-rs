@@ -26,8 +26,9 @@ deliberately does not match every feature of the C++ original. See
   same shape as `rs-matter-embassy`'s `light_thread_coex` example).
 - `SoilMeasurement` cluster reporting moisture % (hand-written handler - see
   below).
-- Battery-shaped `PowerSource` cluster reporting battery % and voltage
-  (hand-written handler - see below).
+- Battery-shaped `PowerSource` cluster reporting battery %, voltage and an
+  estimated time remaining from the voltage trend over the last 24 h, available
+  after 4 h of uptime (hand-written handler - see below).
 - Button: single press samples now, triple click starts the dry/wet
   calibration flow, a 10 s hold factory-resets (erases the Matter fabric and
   reboots).
@@ -43,7 +44,7 @@ deliberately does not match every feature of the C++ original. See
   the longer LIT period (`THREAD_LIT_POLL_PERIOD_MS`) following the controller's
   ICD setting, and shortening to `THREAD_ACTIVE_POLL_PERIOD_MS` for
   `THREAD_ACTIVE_HOLD` after a button press, an ICD stay-active request, or while
-  commissioning. Optional CPU light sleep (`--features light-sleep`).
+  commissioning.
 - LIT ICD: hosts the Matter ICD Management cluster on endpoint 0 and
   periodically sweeps registered clients with a Check-In when their subscription
   has lapsed (`CHECK_IN_PERIOD`).

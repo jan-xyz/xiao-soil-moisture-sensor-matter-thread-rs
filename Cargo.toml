@@ -26,10 +26,6 @@ opt-level = "s"
 [features]
 default = ["esp32c6", "trouble", "thread"]
 trouble = ["rs-matter-embassy/trouble"]
-# Automatic CPU light sleep (esp-rtos idle hook). Off by default because it
-# breaks USB-Serial/JTAG logging; enable for power measurement over UART.
-# Only effective together with the sleepy-end-device config (see src/main.rs).
-light-sleep = []
 esp32c6 = [
   "esp-rtos/esp32c6",
   "esp-hal/esp32c6",
@@ -64,9 +60,11 @@ esp-storage = { version = "0.10", features = ["embedded-storage"] }
 esp-bootloader-esp-idf = { version = "0.6", features = ["log-04"] }
 esp-metadata-generated = "0.5"
 
-# Pinned to our fork's `matter-sed-icd` branch: adaptive SED poll periods plus a
-# hook that lets the app drive ICD Check-Ins (via the rs-matter-stack patch below).
-rs-matter-embassy = { git = "https://github.com/jan-xyz/rs-matter-embassy", rev = "7d201d2962d09050467e8cfd6cc5011bf0ebd91d", default-features = false, features = [
+# Pinned to our fork's `matter-sed-icd` branch: adaptive SED poll periods, a
+# child-supervision check timeout that follows them, fast-poll bursts after every
+# sent message, plus a hook that lets the app drive ICD Check-Ins (via the
+# rs-matter-stack patch below).
+rs-matter-embassy = { git = "https://github.com/jan-xyz/rs-matter-embassy", rev = "28dc310aa2d20629e735ad2379415080b8cde92c", default-features = false, features = [
   "esp",
   "log",
 ] }
@@ -82,12 +80,16 @@ portable-atomic = "1"
 # Pinned to our fork's `matter-sed-icd` branch. Exposes the interaction model's
 # subscription table, which the app needs to send Matter ICD Check-In messages.
 rs-matter-stack = { git = "https://github.com/jan-xyz/rs-matter-stack", rev = "c22e5b11ab08f8117178611152c7c2bf3b823a9d" }
-esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+# Pinned to the `sed-rx-sleep` branches of our esp-hal and openthread forks: they
+# add `Ieee802154::stop_receive` and call it in `EspRadio::set_sleep`, so the SED
+# receiver is off between data polls.
+openthread = { git = "https://github.com/jan-xyz/openthread", rev = "00d20c52efa8b5963ac6497a8aad3b042312dc4c" }
+esp-hal = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
+esp-rtos = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
+esp-alloc = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
+esp-backtrace = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
+esp-println = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
+esp-radio = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
+esp-storage = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
+esp-bootloader-esp-idf = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
+esp-metadata-generated = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }

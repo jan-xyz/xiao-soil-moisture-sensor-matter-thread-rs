@@ -30,6 +30,120 @@ pub fn battery_percent(mv: i32, empty_mv: i32, full_mv: i32) -> u8 {
     pct.clamp(0, 100) as u8
 }
 
+/// Whether a new reading moved far enough from the last *reported* one to be
+/// reported. Comparing against the last report rather than the previous sample
+/// lets a slow trend accumulate until it crosses `min_delta`, while jitter
+/// below `min_delta` still does not wake the radio. The first reading always
+/// reports.
+pub fn should_report(last_reported: Option<u32>, current: u32, min_delta: u32) -> bool {
+    match last_reported {
+        Some(last_reported) => last_reported.abs_diff(current) >= min_delta,
+        None => true,
+    }
+}
+
+/// A ring buffer of battery voltage samples, used to estimate how long the
+/// cell lasts from the rate at which its voltage falls.
+///
+/// The estimate is a least-squares line through the samples, so ADC jitter
+/// between single readings averages out. An alkaline cell does not discharge
+/// linearly: the estimate follows the recent trend, not the full curve.
+pub struct DischargeHistory<const N: usize> {
+    samples: [(u32, i32); N],
+    len: usize,
+    next: usize,
+    last_s: Option<u32>,
+    interval_s: u32,
+    replaced_rise_mv: i32,
+}
+
+impl<const N: usize> DischargeHistory<N> {
+    /// Records at most one sample per `interval_s`. A voltage more than
+    /// `replaced_rise_mv` above the highest recorded sample means a new cell,
+    /// and clears the history.
+    pub const fn new(interval_s: u32, replaced_rise_mv: i32) -> Self {
+        Self {
+            samples: [(0, 0); N],
+            len: 0,
+            next: 0,
+            last_s: None,
+            interval_s,
+            replaced_rise_mv,
+        }
+    }
+
+    pub fn push(&mut self, now_s: u32, mv: i32) {
+        let highest_mv = self.samples[..self.len].iter().map(|&(_, mv)| mv).max();
+        if matches!(highest_mv, Some(highest_mv) if mv > highest_mv + self.replaced_rise_mv) {
+            self.len = 0;
+            self.next = 0;
+            self.last_s = None;
+        }
+
+        if matches!(self.last_s, Some(last_s) if now_s.saturating_sub(last_s) < self.interval_s) {
+            return;
+        }
+
+        self.samples[self.next] = (now_s, mv);
+        self.next = (self.next + 1) % N;
+        self.len = (self.len + 1).min(N);
+        self.last_s = Some(now_s);
+    }
+
+    /// Seconds until the fitted voltage line reaches `empty_mv`. `None` until
+    /// the samples span at least `min_span_s` and the fitted line fell by at
+    /// least `min_drop_mv` over that span, because a shorter or flatter trend
+    /// is mostly noise.
+    pub fn time_remaining_s(
+        &self,
+        empty_mv: i32,
+        min_span_s: u32,
+        min_drop_mv: i32,
+    ) -> Option<u32> {
+        let samples = &self.samples[..self.len];
+        let first_s = samples.iter().map(|&(t, _)| t).min()?;
+        let last_s = samples.iter().map(|&(t, _)| t).max()?;
+        let span_s = last_s - first_s;
+        if span_s < min_span_s || span_s == 0 {
+            return None;
+        }
+
+        let n = samples.len() as i64;
+        let mean_t = samples
+            .iter()
+            .map(|&(t, _)| i64::from(t - first_s))
+            .sum::<i64>()
+            / n;
+        let mean_mv = samples.iter().map(|&(_, mv)| i64::from(mv)).sum::<i64>() / n;
+        let (cov, var) = samples.iter().fold((0i64, 0i64), |(cov, var), &(t, mv)| {
+            let dt = i64::from(t - first_s) - mean_t;
+            (cov + dt * (i64::from(mv) - mean_mv), var + dt * dt)
+        });
+        if var == 0 {
+            return None;
+        }
+
+        let drop_mv = -cov * i64::from(span_s) / var;
+        if drop_mv < i64::from(min_drop_mv) {
+            return None;
+        }
+
+        let last_fit_mv = mean_mv + cov * (i64::from(last_s - first_s) - mean_t) / var;
+        let remaining_s = (last_fit_mv - i64::from(empty_mv)).max(0) * var / -cov;
+
+        Some(remaining_s.clamp(0, i64::from(u32::MAX)) as u32)
+    }
+}
+
+/// Whether the node may use the long LIT poll period: only when it has at least
+/// one fabric and every fabric has a registered ICD client. A controller that
+/// did not register (e.g. Home Assistant) expects SIT responsiveness and cannot
+/// reach a node that polls only every LIT period.
+pub fn every_fabric_has_icd_client(fabric_registrations: impl IntoIterator<Item = usize>) -> bool {
+    let mut fabrics = fabric_registrations.into_iter().peekable();
+    fabrics.peek().is_some() && fabrics.all(|registrations| registrations > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,6 +280,269 @@ mod tests {
         } in test_cases
         {
             let result = battery_percent(input_mv, input_empty_mv, input_full_mv);
+            assert_eq!(result, expected, "Failed case: '{name}'");
+        }
+    }
+
+    const HOUR_S: u32 = 3_600;
+
+    struct DischargeTestCase {
+        name: &'static str,
+        input_samples: &'static [(u32, i32)],
+        input_interval_s: u32,
+        input_replaced_rise_mv: i32,
+        input_empty_mv: i32,
+        input_min_span_s: u32,
+        input_min_drop_mv: i32,
+        expected: Option<u32>,
+    }
+
+    #[test]
+    fn test_discharge_history_time_remaining() {
+        let test_cases = vec![
+            DischargeTestCase {
+                name: "no samples has no estimate",
+                input_samples: &[],
+                input_interval_s: 0,
+                input_replaced_rise_mv: 100,
+                input_empty_mv: 1000,
+                input_min_span_s: HOUR_S,
+                input_min_drop_mv: 10,
+                expected: None,
+            },
+            DischargeTestCase {
+                name: "steady 10 mV per hour fall extrapolates to empty",
+                input_samples: &[(0, 1400), (HOUR_S, 1390), (2 * HOUR_S, 1380)],
+                input_interval_s: 0,
+                input_replaced_rise_mv: 100,
+                input_empty_mv: 1000,
+                input_min_span_s: HOUR_S,
+                input_min_drop_mv: 10,
+                expected: Some(38 * HOUR_S),
+            },
+            DischargeTestCase {
+                name: "jitter around a steady fall averages out",
+                input_samples: &[
+                    (0, 1405),
+                    (HOUR_S, 1385),
+                    (2 * HOUR_S, 1385),
+                    (3 * HOUR_S, 1365),
+                ],
+                input_interval_s: 0,
+                input_replaced_rise_mv: 100,
+                input_empty_mv: 1000,
+                input_min_span_s: HOUR_S,
+                input_min_drop_mv: 10,
+                expected: Some(110_100),
+            },
+            DischargeTestCase {
+                name: "span shorter than the minimum has no estimate",
+                input_samples: &[(0, 1400), (HOUR_S, 1300)],
+                input_interval_s: 0,
+                input_replaced_rise_mv: 100,
+                input_empty_mv: 1000,
+                input_min_span_s: 2 * HOUR_S,
+                input_min_drop_mv: 10,
+                expected: None,
+            },
+            DischargeTestCase {
+                name: "drop smaller than the minimum has no estimate",
+                input_samples: &[(0, 1400), (HOUR_S, 1398), (2 * HOUR_S, 1396)],
+                input_interval_s: 0,
+                input_replaced_rise_mv: 100,
+                input_empty_mv: 1000,
+                input_min_span_s: HOUR_S,
+                input_min_drop_mv: 10,
+                expected: None,
+            },
+            DischargeTestCase {
+                name: "rising voltage has no estimate",
+                input_samples: &[(0, 1380), (HOUR_S, 1390), (2 * HOUR_S, 1400)],
+                input_interval_s: 0,
+                input_replaced_rise_mv: 100,
+                input_empty_mv: 1000,
+                input_min_span_s: HOUR_S,
+                input_min_drop_mv: 10,
+                expected: None,
+            },
+            DischargeTestCase {
+                name: "fitted voltage below empty reads zero",
+                input_samples: &[(0, 1020), (HOUR_S, 1000), (2 * HOUR_S, 980)],
+                input_interval_s: 0,
+                input_replaced_rise_mv: 100,
+                input_empty_mv: 1000,
+                input_min_span_s: HOUR_S,
+                input_min_drop_mv: 10,
+                expected: Some(0),
+            },
+            DischargeTestCase {
+                name: "samples closer than the interval are skipped",
+                input_samples: &[
+                    (0, 1400),
+                    (HOUR_S / 2, 1000),
+                    (HOUR_S, 1390),
+                    (2 * HOUR_S, 1380),
+                ],
+                input_interval_s: HOUR_S,
+                input_replaced_rise_mv: 100,
+                input_empty_mv: 1000,
+                input_min_span_s: HOUR_S,
+                input_min_drop_mv: 10,
+                expected: Some(38 * HOUR_S),
+            },
+            DischargeTestCase {
+                name: "a new cell clears the old history",
+                input_samples: &[
+                    (0, 1100),
+                    (HOUR_S, 1050),
+                    (2 * HOUR_S, 1500),
+                    (3 * HOUR_S, 1490),
+                    (4 * HOUR_S, 1480),
+                ],
+                input_interval_s: 0,
+                input_replaced_rise_mv: 100,
+                input_empty_mv: 1000,
+                input_min_span_s: HOUR_S,
+                input_min_drop_mv: 10,
+                expected: Some(48 * HOUR_S),
+            },
+            DischargeTestCase {
+                name: "a full buffer drops the oldest samples",
+                input_samples: &[
+                    (0, 1500),
+                    (HOUR_S, 1400),
+                    (2 * HOUR_S, 1390),
+                    (3 * HOUR_S, 1380),
+                    (4 * HOUR_S, 1370),
+                ],
+                input_interval_s: 0,
+                input_replaced_rise_mv: 200,
+                input_empty_mv: 1000,
+                input_min_span_s: HOUR_S,
+                input_min_drop_mv: 10,
+                expected: Some(37 * HOUR_S),
+            },
+        ];
+
+        for DischargeTestCase {
+            name,
+            input_samples,
+            input_interval_s,
+            input_replaced_rise_mv,
+            input_empty_mv,
+            input_min_span_s,
+            input_min_drop_mv,
+            expected,
+        } in test_cases
+        {
+            let mut history = DischargeHistory::<4>::new(input_interval_s, input_replaced_rise_mv);
+            for &(now_s, mv) in input_samples {
+                history.push(now_s, mv);
+            }
+
+            let result =
+                history.time_remaining_s(input_empty_mv, input_min_span_s, input_min_drop_mv);
+            assert_eq!(result, expected, "Failed case: '{name}'");
+        }
+    }
+
+    struct IcdClientTestCase {
+        name: &'static str,
+        input_fabric_registrations: &'static [usize],
+        expected: bool,
+    }
+
+    #[test]
+    fn test_every_fabric_has_icd_client() {
+        let test_cases = vec![
+            IcdClientTestCase {
+                name: "no fabrics stays in SIT",
+                input_fabric_registrations: &[],
+                expected: false,
+            },
+            IcdClientTestCase {
+                name: "single fabric without a client stays in SIT",
+                input_fabric_registrations: &[0],
+                expected: false,
+            },
+            IcdClientTestCase {
+                name: "single fabric with a client allows LIT",
+                input_fabric_registrations: &[1],
+                expected: true,
+            },
+            IcdClientTestCase {
+                name: "one fabric without a client stays in SIT",
+                input_fabric_registrations: &[1, 0],
+                expected: false,
+            },
+            IcdClientTestCase {
+                name: "every fabric with clients allows LIT",
+                input_fabric_registrations: &[2, 1],
+                expected: true,
+            },
+        ];
+
+        for IcdClientTestCase {
+            name,
+            input_fabric_registrations,
+            expected,
+        } in test_cases
+        {
+            let result = every_fabric_has_icd_client(input_fabric_registrations.iter().copied());
+            assert_eq!(result, expected, "Failed case: '{name}'");
+        }
+    }
+
+    struct ShouldReportTestCase {
+        name: &'static str,
+        input_last_reported: Option<u32>,
+        input_current: u32,
+        input_min_delta: u32,
+        expected: bool,
+    }
+
+    #[test]
+    fn test_should_report() {
+        let test_cases = vec![
+            ShouldReportTestCase {
+                name: "first reading always reports",
+                input_last_reported: None,
+                input_current: 40,
+                input_min_delta: 2,
+                expected: true,
+            },
+            ShouldReportTestCase {
+                name: "jitter below the delta does not report",
+                input_last_reported: Some(40),
+                input_current: 41,
+                input_min_delta: 2,
+                expected: false,
+            },
+            ShouldReportTestCase {
+                name: "a slow fall reports once it reaches the delta",
+                input_last_reported: Some(40),
+                input_current: 38,
+                input_min_delta: 2,
+                expected: true,
+            },
+            ShouldReportTestCase {
+                name: "a rise reports once it reaches the delta",
+                input_last_reported: Some(1400),
+                input_current: 1420,
+                input_min_delta: 20,
+                expected: true,
+            },
+        ];
+
+        for ShouldReportTestCase {
+            name,
+            input_last_reported,
+            input_current,
+            input_min_delta,
+            expected,
+        } in test_cases
+        {
+            let result = should_report(input_last_reported, input_current, input_min_delta);
             assert_eq!(result, expected, "Failed case: '{name}'");
         }
     }
