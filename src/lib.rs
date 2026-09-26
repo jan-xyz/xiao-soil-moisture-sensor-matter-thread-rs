@@ -30,6 +30,18 @@ pub fn battery_percent(mv: i32, empty_mv: i32, full_mv: i32) -> u8 {
     pct.clamp(0, 100) as u8
 }
 
+/// Whether a new reading moved far enough from the last *reported* one to be
+/// reported. Comparing against the last report rather than the previous sample
+/// lets a slow trend accumulate until it crosses `min_delta`, while jitter
+/// below `min_delta` still does not wake the radio. The first reading always
+/// reports.
+pub fn should_report(last_reported: Option<u32>, current: u32, min_delta: u32) -> bool {
+    match last_reported {
+        Some(last_reported) => last_reported.abs_diff(current) >= min_delta,
+        None => true,
+    }
+}
+
 /// A ring buffer of battery voltage samples, used to estimate how long the
 /// cell lasts from the rate at which its voltage falls.
 ///
@@ -477,6 +489,60 @@ mod tests {
         } in test_cases
         {
             let result = every_fabric_has_icd_client(input_fabric_registrations.iter().copied());
+            assert_eq!(result, expected, "Failed case: '{name}'");
+        }
+    }
+
+    struct ShouldReportTestCase {
+        name: &'static str,
+        input_last_reported: Option<u32>,
+        input_current: u32,
+        input_min_delta: u32,
+        expected: bool,
+    }
+
+    #[test]
+    fn test_should_report() {
+        let test_cases = vec![
+            ShouldReportTestCase {
+                name: "first reading always reports",
+                input_last_reported: None,
+                input_current: 40,
+                input_min_delta: 2,
+                expected: true,
+            },
+            ShouldReportTestCase {
+                name: "jitter below the delta does not report",
+                input_last_reported: Some(40),
+                input_current: 41,
+                input_min_delta: 2,
+                expected: false,
+            },
+            ShouldReportTestCase {
+                name: "a slow fall reports once it reaches the delta",
+                input_last_reported: Some(40),
+                input_current: 38,
+                input_min_delta: 2,
+                expected: true,
+            },
+            ShouldReportTestCase {
+                name: "a rise reports once it reaches the delta",
+                input_last_reported: Some(1400),
+                input_current: 1420,
+                input_min_delta: 20,
+                expected: true,
+            },
+        ];
+
+        for ShouldReportTestCase {
+            name,
+            input_last_reported,
+            input_current,
+            input_min_delta,
+            expected,
+        } in test_cases
+        {
+            let result = should_report(input_last_reported, input_current, input_min_delta);
             assert_eq!(result, expected, "Failed case: '{name}'");
         }
     }

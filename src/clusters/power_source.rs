@@ -59,7 +59,7 @@ struct Reading {
     time_remaining_s: Option<u32>,
 }
 
-/// The last-reported battery reading, or `None`s if never sampled. Shared
+/// The last-reported battery reading, or `None`s if never reported. Shared
 /// between the sampling loop (writer) and the cluster handler (reader).
 pub struct BatteryCell(Mutex<CriticalSectionRawMutex, RefCell<Reading>>);
 
@@ -123,21 +123,22 @@ impl<'a> PowerSourceHandler<'a> {
 
     /// Called by the sampling loop with a freshly measured resting voltage,
     /// the derived percent and the estimated time remaining. Only reports
-    /// (bumps the dataver and wakes `run()` to push a subscription update)
-    /// when the voltage moved by at least `BATTERY_REPORT_DELTA_MV`, or when
-    /// an estimate becomes available or unavailable, so ADC jitter does not
-    /// wake the Thread radio.
+    /// (stores the reading, bumps the dataver and wakes `run()` to push a
+    /// subscription update) when the voltage moved by at least
+    /// `BATTERY_REPORT_DELTA_MV` since the last report, or when an estimate
+    /// becomes available or unavailable, so ADC jitter does not wake the
+    /// Thread radio but a slow discharge still reaches the controller.
     pub fn report(&self, percent: u8, rest_mv: u32, time_remaining_s: Option<u32>) {
-        let previous = self.reading.get();
-        let should_report = match previous.rest_mv {
-            Some(previous_mv) => {
-                previous_mv.abs_diff(rest_mv) >= BATTERY_REPORT_DELTA_MV as u32
-                    || previous.time_remaining_s.is_some() != time_remaining_s.is_some()
-            }
-            None => true,
-        };
+        let reported = self.reading.get();
+        let should_report = soil_sensor_core::should_report(
+            reported.rest_mv,
+            rest_mv,
+            BATTERY_REPORT_DELTA_MV as u32,
+        ) || reported.time_remaining_s.is_some() != time_remaining_s.is_some();
 
-        self.reading.set(percent, rest_mv, time_remaining_s);
+        if should_report {
+            self.reading.set(percent, rest_mv, time_remaining_s);
+        }
 
         log::info!(
             "Battery: {percent}% ({rest_mv} mV, time remaining: {time_remaining_s:?} s, reported change: {should_report})"
