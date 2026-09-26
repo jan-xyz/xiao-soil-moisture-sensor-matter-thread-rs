@@ -26,10 +26,6 @@ opt-level = "s"
 [features]
 default = ["esp32c6", "trouble", "thread"]
 trouble = ["rs-matter-embassy/trouble"]
-# Automatic CPU light sleep (esp-rtos idle hook). Off by default because it
-# breaks USB-Serial/JTAG logging; enable for power measurement over UART.
-# Only effective together with the sleepy-end-device config (see src/main.rs).
-light-sleep = []
 esp32c6 = [
   "esp-rtos/esp32c6",
   "esp-hal/esp32c6",
