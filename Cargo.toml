@@ -60,9 +60,11 @@ esp-storage = { version = "0.10", features = ["embedded-storage"] }
 esp-bootloader-esp-idf = { version = "0.6", features = ["log-04"] }
 esp-metadata-generated = "0.5"
 
-# Pinned to our fork's `matter-sed-icd` branch: adaptive SED poll periods plus a
-# hook that lets the app drive ICD Check-Ins (via the rs-matter-stack patch below).
-rs-matter-embassy = { git = "https://github.com/jan-xyz/rs-matter-embassy", rev = "7d201d2962d09050467e8cfd6cc5011bf0ebd91d", default-features = false, features = [
+# Local worktree of our fork's `matter-sed-icd` branch: adaptive SED poll periods,
+# a child-supervision check timeout that follows them, plus a hook that lets the
+# app drive ICD Check-Ins (via the rs-matter-stack patch below). Switch back to
+# `git` + `rev` once pushed.
+rs-matter-embassy = { path = "/Users/jan.steinke/worktrees/rs-matter-embassy-matter-sed-icd/rs-matter-embassy", default-features = false, features = [
   "esp",
   "log",
 ] }
