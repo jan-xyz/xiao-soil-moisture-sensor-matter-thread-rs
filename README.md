@@ -39,15 +39,17 @@ deliberately does not match every feature of the C++ original. See
   recalibration, and vice versa.
 - Periodic background sampling (every 30 s), reporting only when a reading
   moved enough to matter, so ADC jitter does not wake the Thread radio.
-- Thread Sleepy End Device with an adaptive duty cycle: the receiver is off
-  between data polls, idling at the SIT period (`THREAD_SIT_POLL_PERIOD_MS`) or
-  the longer LIT period (`THREAD_LIT_POLL_PERIOD_MS`) following the controller's
-  ICD setting, and shortening to `THREAD_ACTIVE_POLL_PERIOD_MS` for
-  `THREAD_ACTIVE_HOLD` after a button press, an ICD stay-active request, or while
-  commissioning.
-- LIT ICD: hosts the Matter ICD Management cluster on endpoint 0 and
-  periodically sweeps registered clients with a Check-In when their subscription
-  has lapsed (`CHECK_IN_PERIOD`).
+- Thread Sleepy End Device with an adaptive duty cycle owned by `rs-matter`'s
+  ICD state machine (`EmbassyThread::with_icd`): the receiver is off between
+  data polls, idling at the SIT period (`THREAD_SIT_POLL_PERIOD_MS`) or the
+  longer LIT period (`THREAD_LIT_POLL_PERIOD_MS`) following the controller's ICD
+  registration, and polling at `THREAD_ACTIVE_POLL_PERIOD_MS` for
+  `THREAD_ACTIVE_HOLD_MS` after boot, any Matter message, an ICD
+  stay-active request, a button press, or while commissioning.
+- LIT ICD: hosts the Matter ICD Management cluster on endpoint 0 through
+  `rs-matter`'s `LitIcdMgmtHandler`/`LitIcd`, which sends the Check-In sweep to
+  registered clients whose subscription has lapsed, honors `StayActiveRequest`
+  and switches between SIT and LIT operation as clients register and unregister.
 
 ### Why hand-written cluster handlers?
 

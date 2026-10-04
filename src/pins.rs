@@ -60,49 +60,41 @@ pub const BUTTON_TRIPLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
 pub const BUTTON_FACTORY_RESET_HOLD: Duration = Duration::from_secs(10);
 pub const BUTTON_DEBOUNCE: Duration = Duration::from_millis(20);
 
-/// SED idle data-poll period for **SIT** ("Standard") mode, i.e. while at least
-/// one fabric has no registered ICD client and its controller expects
-/// responsiveness. The Matter
-/// spec caps the SIT slow-poll interval at 15 s. It is also the advertised
-/// Session Idle Interval (`BASIC_INFO.sii`): the controller waits that long
-/// before it retries a message, and a message reaches this node only when it
-/// polls its parent.
+/// SED idle data-poll period for **SIT** ("Standard") mode, i.e. while no
+/// fabric has a registered ICD client and its controller expects
+/// responsiveness. The Matter spec caps the SIT slow-poll interval at 15 s. It
+/// is also the advertised Session Idle Interval (`BASIC_INFO.sii`) while
+/// operating as a SIT: the controller waits that long before it retries a
+/// message, and a message reaches this node only when it polls its parent.
 pub const THREAD_SIT_POLL_PERIOD_MS: u32 = 15_000;
 
 /// SED idle data-poll period for **LIT** ("Battery Saver") mode, i.e. while
 /// every fabric has a registered ICD client, so every controller waits for a
-/// Check-In and long silence is expected. Must stay below `THREAD_CHILD_TIMEOUT_S` and the advertised
-/// `ICD_MODE.idle_mode_duration_s`, or OpenThread clamps the effective period.
+/// Check-In and long silence is expected. This is the advertised
+/// `BASIC_INFO.sii` and the ICD `IdleModeDuration`; the Thread driver sizes the
+/// OpenThread child timeout from it.
 pub const THREAD_LIT_POLL_PERIOD_MS: u32 = 900_000;
 
-/// SED active data-poll period (ms), used for [`THREAD_ACTIVE_HOLD`] after boot
-/// or a local button press / ICD stay-active request, so the controller's
-/// response lands promptly. It is also the advertised Session Active Interval
-/// (`BASIC_INFO.sai`), for the same reason as [`THREAD_SIT_POLL_PERIOD_MS`].
+/// SED active data-poll period (ms), used while the ICD is in active mode -
+/// after boot, after any Matter message, on an ICD `StayActiveRequest` and on a
+/// local button press - so the controller's response lands promptly. It is also
+/// the advertised Session Active Interval (`BASIC_INFO.sai`).
 pub const THREAD_ACTIVE_POLL_PERIOD_MS: u32 = 5_000;
 
-/// How long the SED stays in the active poll period after the last nudge.
-pub const THREAD_ACTIVE_HOLD: Duration = Duration::from_secs(30);
+/// How long the ICD stays in active mode (and at
+/// [`THREAD_ACTIVE_POLL_PERIOD_MS`]) after boot, an idle-to-active transition
+/// or any Matter message: `ICD_MODE.active_mode_duration_ms` and
+/// `active_mode_threshold_ms`.
+pub const THREAD_ACTIVE_HOLD_MS: u32 = 30_000;
 
-/// SED poll period (ms) for a short burst after the device sends any Matter
-/// message, so the controller's reply is fetched from the parent at once
-/// instead of after a retransmission. Matches the connectedhomeip default ICD
-/// fast-poll interval.
-pub const THREAD_FAST_POLL_PERIOD_MS: u32 = 200;
-
-/// How long the fast-poll burst lasts after the last sent message (ms). It is
-/// also the advertised Matter ICD active-mode duration
-/// (`ICD_MODE.active_mode_duration_ms`), because the burst is that active mode.
-pub const THREAD_FAST_HOLD_MS: u32 = 1_000;
+/// How many ICD Check-Ins may be sent between two flash writes of the Check-In
+/// counter: the persisted boundary jumps this far ahead of the live counter, and
+/// equally far forward across a restart.
+pub const ICD_COUNTER_EPOCH: u32 = 1_000;
 
 /// Background sampling cadence (seconds). The measurement loop wakes the CPU
 /// this often regardless of the radio's poll schedule.
 pub const SAMPLE_PERIOD_SECS: u32 = 30;
-
-/// Thread child timeout (seconds). The parent evicts this node if it goes this
-/// long without hearing from it, so this must exceed the longest idle poll
-/// period ([`THREAD_LIT_POLL_PERIOD_MS`]).
-pub const THREAD_CHILD_TIMEOUT_S: u32 = 1_800;
 
 /// esp-radio 802.15.4 receive-queue depth (frames buffered before drops, logged
 /// as "Receive queue full"). esp-radio's own default of 10 is too small for
@@ -111,14 +103,6 @@ pub const THREAD_CHILD_TIMEOUT_S: u32 = 1_800;
 /// headroom. Each queued frame is a ~130-byte heap buffer held until reset, so
 /// 200 caps the worst case at roughly 26 KB.
 pub const THREAD_RX_QUEUE_SIZE: usize = 200;
-
-/// How often the ICD Check-In sweeper runs. This only inspects the subscription
-/// table and messages registered clients whose subscription has lapsed, so it
-/// is not a message per interval.
-pub const CHECK_IN_PERIOD: Duration = Duration::from_secs(300);
-
-/// Scratch buffer for building a Check-In message.
-pub const CHECK_IN_BUF: usize = 256;
 
 /// How long a boot must run before it counts in the persisted Matter
 /// `RebootCount` (General Diagnostics cluster).

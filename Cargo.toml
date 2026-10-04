@@ -41,6 +41,11 @@ thread = [
   "rs-matter-embassy/openthread",
   "rs-matter-embassy/mbedtls",
   "rs-matter-embassy/openthread-heap-int-8192",
+  # Resume CASE sessions across reboots instead of a full Sigma handshake, and
+  # persist the subscriptions so a reboot does not force the controller to
+  # re-subscribe. Both matter for the LIT ICD profile this device implements.
+  "rs-matter-embassy/case-resumption",
+  "rs-matter-embassy/persistent-subscriptions",
 ]
 
 [dependencies]
@@ -55,16 +60,15 @@ esp-hal = { version = "~1.2", features = ["log-04", "unstable", "exception-handl
 esp-rtos = { version = "0.4", features = ["esp-radio", "embassy"] }
 esp-alloc = "0.11"
 esp-println = { version = "0.18", features = ["log-04"] }
-esp-radio = { version = "1.0.0-beta.0", features = ["ble", "log-04", "unstable"] }
+esp-radio = { version = "1.0.0-beta.1", features = ["ble", "log-04", "unstable"] }
 esp-storage = { version = "0.10", features = ["embedded-storage"] }
 esp-bootloader-esp-idf = { version = "0.6", features = ["log-04"] }
 esp-metadata-generated = "0.5"
 
-# Pinned to our fork's `matter-sed-icd` branch: adaptive SED poll periods, a
-# child-supervision check timeout that follows them, fast-poll bursts after every
-# sent message, plus a hook that lets the app drive ICD Check-Ins (via the
-# rs-matter-stack patch below).
-rs-matter-embassy = { git = "https://github.com/jan-xyz/rs-matter-embassy", rev = "28dc310aa2d20629e735ad2379415080b8cde92c", default-features = false, features = [
+# Pinned to `sysgrok/rs-matter-embassy`'s `icd` branch (PR #87). The Thread SED
+# driver there follows the ICD power mode state machine that `rs-matter` itself
+# owns (`EmbassyThread::with_icd`) instead of an app-driven poll-period handle.
+rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev = "66f7908803d09d04f47bffa21985cc07ffc7a1a2", default-features = false, features = [
   "esp",
   "log",
 ] }
@@ -77,19 +81,31 @@ static_cell = "2"
 portable-atomic = "1"
 
 [patch.crates-io]
-# Pinned to our fork's `matter-sed-icd` branch. Exposes the interaction model's
-# subscription table, which the app needs to send Matter ICD Check-In messages.
-rs-matter-stack = { git = "https://github.com/jan-xyz/rs-matter-stack", rev = "c22e5b11ab08f8117178611152c7c2bf3b823a9d" }
-# Pinned to the `sed-rx-sleep` branches of our esp-hal and openthread forks: they
-# add `Ieee802154::stop_receive` and call it in `EspRadio::set_sleep`, so the SED
-# receiver is off between data polls.
-openthread = { git = "https://github.com/jan-xyz/openthread", rev = "00d20c52efa8b5963ac6497a8aad3b042312dc4c" }
-esp-hal = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
-esp-rtos = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
-esp-alloc = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
-esp-backtrace = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
-esp-println = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
-esp-radio = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
-esp-storage = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
-esp-bootloader-esp-idf = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
-esp-metadata-generated = { git = "https://github.com/jan-xyz/esp-hal", rev = "701f196cbb3dd821f8deef49a226417ee6957d84" }
+# The ICD support `rs-matter-embassy`'s `icd` branch builds on (the `Icd` power
+# mode state machine, `LitIcd`/`LitIcdMgmtHandler`) lives on `rs-matter`'s main
+# branch, past the published `0.4.1` release that `rs-matter-stack` still
+# resolves to.
+rs-matter = { git = "https://github.com/project-chip/rs-matter", rev = "f99b42f5dd7d4609da80b0facfa85e5e85b7644c" }
+# `sysgrok/openthread`'s `csl` branch adds the CSL (Coordinated Sampled
+# Listening) API (`set_csl_period`, `wait_radio_ready`, ...) and the `esp-radio`
+# 1.0.0-beta.1 `Ieee802154` sleep support the SED driver needs.
+openthread = { git = "https://github.com/sysgrok/openthread", rev = "fed54d2f765e2989741a9606e8b932d7fffcd5dc" }
+openthread-sys = { git = "https://github.com/sysgrok/openthread", rev = "fed54d2f765e2989741a9606e8b932d7fffcd5dc" }
+# `ivmarkov/esp-hal`'s `ieee802154-sleep` branch: the `esp-radio` 1.0.0-beta.1
+# that `sysgrok/openthread` needs, plus `Ieee802154::stop_receive` /
+# `EspRadio::set_sleep` so the SED receiver is off between data polls.
+esp-hal = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-rtos = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-alloc = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-backtrace = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-println = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-radio = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-radio-rtos-driver = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-phy = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-sync = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-rom-sys = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-hal-procmacros = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-riscv-rt = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-storage = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-bootloader-esp-idf = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
+esp-metadata-generated = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
