@@ -21,20 +21,16 @@ use core::cell::RefCell;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
-use rs_matter_embassy::matter::dm::{
-    ArrayAttributeRead, Cluster, Dataver, HandlerContext, ReadContext,
-};
-use rs_matter_embassy::matter::error::Error;
-use rs_matter_embassy::matter::im::EndptId;
-use rs_matter_embassy::matter::tlv::{
-    Nullable, TLVBuilderParent, ToTLVArrayBuilder, ToTLVBuilder, Utf8StrBuilder,
-};
-use rs_matter_embassy::matter::utils::sync::Signal;
-use rs_matter_embassy::matter::with;
+use rs_matter::dm::{ArrayAttributeRead, Cluster, Dataver, HandlerContext, ReadContext};
+use rs_matter::error::Error;
+use rs_matter::im::EndptId;
+use rs_matter::tlv::{Nullable, TLVBuilderParent, ToTLVArrayBuilder, ToTLVBuilder, Utf8StrBuilder};
+use rs_matter::utils::sync::Signal;
+use rs_matter::with;
 
-pub use rs_matter_embassy::matter::dm::clusters::decl::power_source::*;
+pub use rs_matter::dm::clusters::decl::power_source::*;
 
-use crate::pins::BATTERY_REPORT_DELTA_MV;
+use soil_sensor_core::tuning::BATTERY_REPORT_DELTA_MV;
 
 pub const CLUSTER: Cluster<'static> = FULL_CLUSTER
     .with_features(Feature::BATTERY.bits())
@@ -209,7 +205,7 @@ impl ClusterHandler for PowerSourceHandler<'_> {
         match builder {
             ArrayAttributeRead::ReadAll(builder) => builder.end(),
             ArrayAttributeRead::ReadOne(_, _) => {
-                Err(rs_matter_embassy::matter::error::ErrorCode::ConstraintError.into())
+                Err(rs_matter::error::ErrorCode::ConstraintError.into())
             }
             ArrayAttributeRead::ReadNone(builder) => builder.end(),
         }
@@ -258,5 +254,67 @@ impl ClusterHandler for PowerSourceHandler<'_> {
     fn bat_replaceability(&self, _ctx: impl ReadContext) -> Result<BatReplaceabilityEnum, Error> {
         // A user swaps the AA cell directly - no tools, no factory visit.
         Ok(BatReplaceabilityEnum::UserReplaceable)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A handler over a cell of its own.
+    ///
+    /// The cell has to be per-handler: the last reported value lives in it, and
+    /// a shared one would let one test's reports suppress another's.
+    fn handler() -> PowerSourceHandler<'static> {
+        let cell: &'static BatteryCell = Box::leak(Box::new(BatteryCell::new()));
+        PowerSourceHandler::new(1, Dataver::new(0), cell)
+    }
+
+    #[test]
+    fn the_first_reading_always_reports() {
+        let handler = handler();
+        let before = handler.dataver();
+
+        handler.report(80, 1400, None);
+
+        assert_ne!(handler.dataver(), before);
+    }
+
+    #[test]
+    fn voltage_jitter_below_the_deadband_is_not_reported() {
+        let handler = handler();
+        handler.report(80, 1400, None);
+        let reported = handler.dataver();
+
+        handler.report(80, 1410, None);
+        assert_eq!(
+            handler.dataver(),
+            reported,
+            "ten millivolts is converter noise at this scale"
+        );
+    }
+
+    #[test]
+    fn a_reading_that_moved_enough_is_reported() {
+        let handler = handler();
+        handler.report(80, 1400, None);
+        let reported = handler.dataver();
+
+        handler.report(79, 1380, None);
+        assert_ne!(handler.dataver(), reported);
+    }
+
+    #[test]
+    fn an_estimate_appearing_on_its_own_is_reported() {
+        let handler = handler();
+        handler.report(80, 1400, None);
+        let reported = handler.dataver();
+
+        handler.report(80, 1400, Some(3_600));
+        assert_ne!(
+            handler.dataver(),
+            reported,
+            "a new time-remaining estimate is news even when the voltage has not moved"
+        );
     }
 }

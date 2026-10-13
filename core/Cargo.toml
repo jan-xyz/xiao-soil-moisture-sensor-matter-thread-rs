@@ -1,0 +1,17 @@
+[package]
+name = "soil-sensor-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Decision layer: the device's behaviour, as pure state machines over ports."
+
+[lib]
+name = "soil_sensor_core"
+path = "src/lib.rs"
+
+[dependencies]
+# `log` is a facade: no runtime, no hardware, no clock, and nothing to link. It
+# is here so the decision layer can say what it decided without the composition
+# root having to guess. Everything else this crate needs it defines itself.
+# See `ARCHITECTURE.md`.
+log = "0.4"

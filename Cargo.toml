@@ -1,17 +1,14 @@
-[package]
-name = "xiao-soil-moisture-sensor-matter-thread"
+[workspace]
+resolver = "2"
+members = ["core", "node", "fw", "sim"]
+# `sim` is host-only, so a bare `cargo build` (which targets the bare-metal
+# triple from `.cargo/config.toml`) must not reach it. `fw` is the firmware.
+default-members = ["fw"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-
-[lib]
-name = "soil_sensor_core"
-path = "src/lib.rs"
-
-[[bin]]
-name = "xiao-soil-moisture-sensor-matter-thread"
-path = "src/main.rs"
-harness = false
 
 [profile.release]
 codegen-units = 1
@@ -22,63 +19,6 @@ overflow-checks = false
 
 [profile.dev]
 opt-level = "s"
-
-[features]
-default = ["esp32c6", "trouble", "thread"]
-trouble = ["rs-matter-embassy/trouble"]
-esp32c6 = [
-  "esp-rtos/esp32c6",
-  "esp-hal/esp32c6",
-  "esp-backtrace/esp32c6",
-  "esp-println/esp32c6",
-  "esp-radio/esp32c6",
-  "esp-storage/esp32c6",
-  "esp-bootloader-esp-idf/esp32c6",
-  "esp-metadata-generated/esp32c6",
-  "portable-atomic/critical-section",
-]
-thread = [
-  "rs-matter-embassy/openthread",
-  "rs-matter-embassy/mbedtls",
-  "rs-matter-embassy/openthread-heap-int-8192",
-  # Resume CASE sessions across reboots instead of a full Sigma handshake, and
-  # persist the subscriptions so a reboot does not force the controller to
-  # re-subscribe. Both matter for the LIT ICD profile this device implements.
-  "rs-matter-embassy/case-resumption",
-  "rs-matter-embassy/persistent-subscriptions",
-]
-
-[dependencies]
-log = "0.4"
-embassy-executor = "0.10"
-embassy-embedded-hal = "0.6"
-embassy-futures = "0.1"
-embassy-time = "0.5"
-embassy-sync = "0.8"
-esp-backtrace = { version = "0.20", features = ["panic-handler", "println"] }
-esp-hal = { version = "~1.2", features = ["log-04", "unstable", "exception-handler"] }
-esp-rtos = { version = "0.4", features = ["esp-radio", "embassy"] }
-esp-alloc = "0.11"
-esp-println = { version = "0.18", features = ["log-04"] }
-esp-radio = { version = "1.0.0-beta.1", features = ["ble", "log-04", "unstable"] }
-esp-storage = { version = "0.10", features = ["embedded-storage"] }
-esp-bootloader-esp-idf = { version = "0.6", features = ["log-04"] }
-esp-metadata-generated = "0.5"
-
-# Pinned to `sysgrok/rs-matter-embassy`'s `icd` branch (PR #87). The Thread SED
-# driver there follows the ICD power mode state machine that `rs-matter` itself
-# owns (`EmbassyThread::with_icd`) instead of an app-driven poll-period handle.
-rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev = "66f7908803d09d04f47bffa21985cc07ffc7a1a2", default-features = false, features = [
-  "esp",
-  "log",
-] }
-
-sequential-storage = "3"
-embedded-storage-async = "0.4.1"
-
-tinyrlibc = { version = "0.5", default-features = false, features = ["memchr", "utoa", "strtoul"] }
-static_cell = "2"
-portable-atomic = "1"
 
 [patch.crates-io]
 # The ICD support `rs-matter-embassy`'s `icd` branch builds on (the `Icd` power

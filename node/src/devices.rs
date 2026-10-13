@@ -1,4 +1,4 @@
-use rs_matter_embassy::matter::dm::DeviceType;
+use rs_matter::dm::DeviceType;
 
 /// Matter Device Library spec assigns Soil Sensor device type `0x0045`,
 /// revision 1 (`data_model/1.5/device_types/SoilSensor.xml`). `rs-matter`

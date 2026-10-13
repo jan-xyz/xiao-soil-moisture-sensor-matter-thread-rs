@@ -1,0 +1,28 @@
+[package]
+name = "soil-sensor-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Integration layer: the Matter node - endpoints, clusters, protocol glue."
+
+[lib]
+name = "soil_sensor_node"
+path = "src/lib.rs"
+
+[dependencies]
+soil-sensor-core = { path = "../core" }
+
+# The protocol stack. `default-features = false` keeps `std` and the OS
+# networking out: this crate only needs the data model and the TLV layer, and it
+# has to build for the bare-metal target as well as the host. Only the
+# simulation crate may turn `os` on, and only for the host.
+rs-matter = { version = "0.4", default-features = false, features = ["log"] }
+embassy-sync = "0.8"
+log = "0.4"
+
+[target.'cfg(not(target_os = "none"))'.dev-dependencies]
+# Host tests need a `critical-section` implementation. The firmware gets one from
+# `portable-atomic/critical-section`, but that only exists on the bare-metal
+# target, and dev-dependencies are never built for it - so this cannot reach the
+# firmware. See `ARCHITECTURE.md` on why the host and device layers stay apart.
+critical-section = { version = "1", features = ["std"] }

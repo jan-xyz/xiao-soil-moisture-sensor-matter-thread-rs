@@ -1,0 +1,385 @@
+//! The device's behaviour, walked through boots in a scripted world.
+//!
+//! These are the tests the firmware cannot have on its own: they need a clock
+//! that only moves when the code asks, sensors that say what the test wants, and
+//! a reboot that is just another loop iteration.
+
+use soil_sensor_core::led::{Color, LedCommand};
+use soil_sensor_core::ports::{OperatingMode, Outcome, WakeCause};
+use soil_sensor_core::tuning;
+
+use soil_sensor_sim::energy::Energy;
+use soil_sensor_sim::{Script, World};
+
+const MINUTE: u64 = 60_000;
+const HOUR: u64 = 60 * MINUTE;
+const DAY: u64 = 24 * HOUR;
+
+#[test]
+fn a_long_idle_boot_samples_once_and_then_sleeps() {
+    let mut world = World::new()
+        .soil(Script::constant(1200))
+        .battery(Script::constant(1400));
+
+    let outcome = world.run_boot(WakeCause::Cold);
+
+    assert_eq!(
+        world.soil_reports().len(),
+        1,
+        "one reading per wake-up is the whole point of the profile"
+    );
+    assert_eq!(world.battery_reports().len(), 1);
+
+    match outcome {
+        Outcome::Sleep { for_ms } => {
+            assert!(
+                for_ms > u64::from(tuning::LIT_POLL_PERIOD_MS) - 60_000,
+                "a long-idle device sleeps for about its idle period, got {for_ms} ms"
+            );
+        }
+        other => panic!("expected a sleep, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_short_idle_device_keeps_sampling_and_does_not_sleep() {
+    // Short-idle until the controller registers, one and a half minutes later.
+    // The script moves so that every reading is worth reporting: a repeated one
+    // is suppressed by the deadband, which would hide the cadence under test.
+    let mut world = World::new()
+        .soil(Script::new([1200, 1000]))
+        .battery(Script::constant(1400))
+        .lit_at(90_000);
+
+    world.run_boot(WakeCause::Cold);
+
+    assert!(
+        world.soil_reports().len() >= 3,
+        "a short-idle device samples on its cadence while it waits to be \
+         registered, got {} reports",
+        world.soil_reports().len()
+    );
+
+    let first_sleep = world.boots().first().expect("one boot").awake_ms;
+    assert!(
+        first_sleep >= 90_000,
+        "it must not sleep before it becomes a long-idle device, woke after {first_sleep} ms"
+    );
+}
+
+#[test]
+fn a_scenario_that_never_becomes_long_idle_is_a_clear_failure_not_a_hang() {
+    let result = std::panic::catch_unwind(|| {
+        let mut world = World::new().lit_at(u64::MAX).boot_limit(2 * HOUR);
+        world.run_boot(WakeCause::Cold);
+    });
+
+    assert!(
+        result.is_err(),
+        "a device that stays reachable by design must not look like a hang"
+    );
+}
+
+#[test]
+fn the_battery_trend_survives_reboots() {
+    // Five hours of wake-ups, with the cell falling a millivolt per reading.
+    let mut world = World::new()
+        .soil(Script::constant(1200))
+        .battery(Script::ramp(1500, 1100, 400));
+
+    world.run_until(5 * HOUR);
+
+    assert!(
+        world.boot_count() > 10,
+        "expected a wake-up per idle period, got {} boots",
+        world.boot_count()
+    );
+
+    let estimate = world.retained().time_remaining_s(
+        tuning::BATTERY_EMPTY_MV,
+        tuning::BATTERY_TIME_REMAINING_MIN_SPAN_SECS,
+        tuning::BATTERY_TIME_REMAINING_MIN_DROP_MV,
+    );
+    assert!(
+        estimate.is_some(),
+        "the trend has to outlive the reboots, or an estimate is never possible"
+    );
+}
+
+#[test]
+fn a_power_cycle_takes_the_retained_state_with_it() {
+    let mut world = World::new()
+        .battery(Script::ramp(1500, 1100, 400))
+        .power_cycle();
+
+    world.run_until(5 * HOUR);
+    let before = world.retained().len();
+
+    let mut after_power_cycle = World::new()
+        .battery(Script::ramp(1500, 1100, 400))
+        .power_cycle();
+    after_power_cycle.run_until(5 * HOUR);
+
+    assert!(before > 1, "the trend accumulated");
+    assert_eq!(
+        after_power_cycle.retained().len(),
+        before,
+        "and it accumulates the same way from a cold start"
+    );
+}
+
+#[test]
+fn a_single_press_samples_and_says_so_on_the_leds() {
+    // A press is what wakes the device in this profile, so the gesture starts
+    // at the boot itself rather than at some later moment the boot would never
+    // live to see.
+    // The script moves, so that the second reading is worth reporting: a
+    // repeated reading is suppressed by the deadband, as it should be.
+    let mut world = World::new()
+        .soil(Script::new([1200, 1000]))
+        .battery(Script::constant(1400))
+        .press(0, 100);
+
+    world.run_boot(WakeCause::Button);
+
+    assert!(
+        world
+            .leds()
+            .iter()
+            .any(|(_, cmd)| matches!(cmd, LedCommand::ClassifyMoisture { .. })),
+        "a single press is meant to say how wet the soil is"
+    );
+    assert!(
+        world.soil_reports().len() >= 2,
+        "and to take a reading there and then"
+    );
+}
+
+#[test]
+fn a_press_keeps_the_boot_awake_while_the_gesture_is_in_progress() {
+    // The device would settle into idle at ACTIVE_HOLD and sleep half a second
+    // later. This press starts just before that and is still down when the
+    // moment arrives.
+    let mut world = World::new()
+        .soil(Script::new([1200, 1000]))
+        .press(10_200, 2_000);
+
+    let outcome = world.run_boot(WakeCause::Timer);
+
+    let awake = match outcome {
+        Outcome::Sleep { .. } => world.boots().first().expect("one boot").awake_ms,
+        other => panic!("expected a sleep eventually, got {other:?}"),
+    };
+    assert!(
+        awake > 11_500,
+        "a sleep would restart the gesture's timing, so the boot has to wait for \
+         it, but it ended after {awake} ms"
+    );
+    assert!(
+        world.soil_reports().len() >= 2,
+        "and the gesture it was waiting for still completes"
+    );
+}
+
+#[test]
+fn a_ten_second_hold_asks_for_a_factory_reset() {
+    let mut world = World::new().press(1_000, 11_000);
+
+    let outcome = world.run_boot(WakeCause::Button);
+
+    assert_eq!(outcome, Outcome::FactoryReset);
+}
+
+#[test]
+fn three_presses_start_the_calibration_flow() {
+    // The script is read in order: the boot's own reading first, then the two
+    // the calibration flow takes, so the probe reads dry and then wet.
+    let mut world = World::new()
+        .soil(Script::new([1200, 1500, 900]))
+        // Three taps inside one click window of each other.
+        .press(1_000, 100)
+        .press(1_300, 100)
+        .press(1_600, 100);
+
+    world.run_boot(WakeCause::Button);
+
+    assert_eq!(world.calibration_writes(), 1, "the flow ran exactly once");
+
+    let calibration = world.calibration();
+    assert_eq!(
+        calibration.dry_mv, 1500,
+        "the dry reference is what the probe read during the red half"
+    );
+    assert_eq!(
+        calibration.wet_mv, 900,
+        "and the wet reference what it read during the green half"
+    );
+
+    let blinks = world
+        .leds()
+        .iter()
+        .filter(|(_, cmd)| matches!(cmd, LedCommand::Blink { .. }))
+        .count();
+    assert_eq!(blinks, 2, "one cue per half of the flow");
+
+    assert!(
+        world.leds().iter().any(|(_, cmd)| matches!(
+            cmd,
+            LedCommand::Blink {
+                color: Color::Red,
+                ..
+            }
+        )),
+        "dry is the red half"
+    );
+    assert!(
+        world.leds().iter().any(|(_, cmd)| matches!(
+            cmd,
+            LedCommand::Blink {
+                color: Color::Green,
+                ..
+            }
+        )),
+        "wet is the green half"
+    );
+}
+
+#[test]
+fn a_calibration_the_probe_cannot_support_is_rejected() {
+    // Dry and wet within the minimum span: the probe was mis-clamped.
+    let mut world = World::new()
+        .soil(Script::new([1200, 1150]))
+        .press(1_000, 100)
+        .press(1_300, 100)
+        .press(1_600, 100);
+
+    world.run_boot(WakeCause::Button);
+
+    assert_eq!(
+        world.calibration_writes(),
+        0,
+        "a calibration that close is noise, and must not be stored"
+    );
+    assert_eq!(
+        world.calibration(),
+        soil_sensor_core::ports::Calibration::DEFAULT
+    );
+}
+
+#[test]
+fn the_reboot_count_is_written_once_per_boot() {
+    let mut world = World::new();
+
+    world.run_until(3 * HOUR);
+
+    assert_eq!(
+        world.reboot_count_writes() as usize,
+        world.boot_count(),
+        "every boot that got far enough to sleep was a healthy one"
+    );
+}
+
+#[test]
+fn the_active_window_dominates_the_energy_budget() {
+    let mut world = World::new().battery(Script::ramp(1500, 1400, 400));
+
+    world.run_until(7 * DAY);
+
+    let energy = Energy::from_world(&world);
+
+    // The point of the long-idle profile: almost all of the time is spent
+    // asleep, and the device lasts years rather than days on a cell.
+    assert!(
+        energy.awake_fraction() < 0.05,
+        "awake {:.3}% of the time",
+        energy.awake_fraction() * 100.0
+    );
+    assert!(
+        energy.life_years(2500.0) > 0.5,
+        "a model, but it should at least be in the right order of magnitude"
+    );
+}
+
+#[test]
+fn the_first_boot_of_a_simulation_is_a_cold_one() {
+    let mut world = World::new().lit_at(90_000);
+
+    let first = world.run_boot(WakeCause::Cold);
+    assert!(matches!(first, Outcome::Sleep { .. }));
+
+    assert_eq!(
+        world.boots().first().expect("one boot").wake,
+        WakeCause::Cold
+    );
+}
+
+#[test]
+fn boots_after_the_first_are_woken_by_the_sleep_timer() {
+    let mut world = World::new();
+
+    world.run_until(2 * HOUR);
+
+    let wakes: Vec<WakeCause> = world.boots().iter().skip(1).map(|b| b.wake).collect();
+    assert!(!wakes.is_empty());
+    assert!(
+        wakes.iter().all(|wake| *wake == WakeCause::Timer),
+        "with no button in the script, every wake is the sleep timer"
+    );
+}
+
+#[test]
+fn the_device_operates_as_a_short_idle_one_until_a_controller_registers() {
+    let mut world = World::new().lit_at(90_000);
+
+    // Before the switch, the profile is the short-idle one.
+    assert_eq!(
+        world.icd_mode_now(),
+        OperatingMode::Sit,
+        "nothing has registered yet"
+    );
+
+    world.run_boot(WakeCause::Cold);
+
+    assert_eq!(
+        world.icd_mode_now(),
+        OperatingMode::Lit,
+        "and by the end of the boot the controller has registered"
+    );
+}
+
+#[test]
+fn a_calibration_survives_a_reboot() {
+    // The probe's own range, captured by the flow during the first boot: dry in
+    // air, wet in water. Both sit well above the firmware's built-in dry
+    // reference, which is the point of calibrating at all.
+    let mut world = World::new()
+        .soil(Script::new([1800, 2500, 1200]))
+        .press(1_000, 100)
+        .press(1_300, 100)
+        .press(1_600, 100);
+
+    world.run_boot(WakeCause::Button);
+    assert_eq!(
+        world.calibration_writes(),
+        1,
+        "the flow stored a calibration"
+    );
+    assert_eq!(world.calibration().dry_mv, 2500);
+    assert_eq!(world.calibration().wet_mv, 1200);
+
+    // A later boot, with the probe in soil reading 1200 mV. Against the
+    // calibration it captured, that is bone dry to fully wet; against the
+    // firmware's defaults it is a little over half. The two answers are far
+    // enough apart to tell which one the device used.
+    world.set_soil(Script::constant(1200));
+    let before = world.soil_reports().len();
+    world.run_boot(WakeCause::Timer);
+
+    let reported = world.soil_reports()[before].percent;
+    assert!(
+        reported >= 90,
+        "the stored calibration has to be loaded on the next boot: 1200 mV \
+         against dry=2500/wet=1200 is fully wet, but it came out as {reported}%, \
+         which is what the built-in defaults give",
+    );
+}

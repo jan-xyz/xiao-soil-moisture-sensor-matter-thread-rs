@@ -11,18 +11,18 @@ use core::cell::RefCell;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
-use rs_matter_embassy::matter::dm::clusters::decl::globals::{
+use rs_matter::dm::clusters::decl::globals::{
     MeasurementAccuracyStructBuilder, MeasurementTypeEnum,
 };
-use rs_matter_embassy::matter::dm::{Dataver, HandlerContext, ReadContext};
-use rs_matter_embassy::matter::error::Error;
-use rs_matter_embassy::matter::im::{EndptId, Percent};
-use rs_matter_embassy::matter::tlv::{Nullable, TLVBuilderParent};
-use rs_matter_embassy::matter::utils::sync::Signal;
+use rs_matter::dm::{Dataver, HandlerContext, ReadContext};
+use rs_matter::error::Error;
+use rs_matter::im::{EndptId, Percent};
+use rs_matter::tlv::{Nullable, TLVBuilderParent};
+use rs_matter::utils::sync::Signal;
 
-pub use rs_matter_embassy::matter::dm::clusters::decl::soil_measurement::*;
+pub use rs_matter::dm::clusters::decl::soil_measurement::*;
 
-use crate::pins::SOIL_REPORT_DELTA_PERCENT;
+use soil_sensor_core::tuning::SOIL_REPORT_DELTA_PERCENT;
 
 /// The last-reported moisture percent, or `None` if the probe has not
 /// sampled yet. Shared between the sampling loop (writer) and the cluster
@@ -97,7 +97,7 @@ impl<'a> SoilMeasurementHandler<'a> {
 }
 
 impl ClusterHandler for SoilMeasurementHandler<'_> {
-    const CLUSTER: rs_matter_embassy::matter::dm::Cluster<'static> = FULL_CLUSTER;
+    const CLUSTER: rs_matter::dm::Cluster<'static> = FULL_CLUSTER;
 
     fn dataver(&self) -> u32 {
         self.dataver.get()
@@ -154,5 +154,79 @@ impl ClusterHandler for SoilMeasurementHandler<'_> {
             Some(percent) => Nullable::some(percent),
             None => Nullable::none(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rs_matter::dm::Dataver;
+
+    /// A handler over a cell of its own.
+    ///
+    /// The cell has to be per-handler: the last reported value lives in it, and
+    /// a shared one would let one test's reports suppress another's.
+    fn handler() -> SoilMeasurementHandler<'static> {
+        let cell: &'static SoilMoistureCell = Box::leak(Box::new(SoilMoistureCell::new()));
+        SoilMeasurementHandler::new(1, Dataver::new(0), cell)
+    }
+
+    #[test]
+    fn the_first_reading_always_reports() {
+        let handler = handler();
+        let before = handler.dataver();
+
+        handler.report(40);
+
+        assert_ne!(
+            handler.dataver(),
+            before,
+            "a controller that has just subscribed has to be told something"
+        );
+    }
+
+    #[test]
+    fn jitter_below_the_deadband_is_not_reported() {
+        let handler = handler();
+        handler.report(40);
+        let reported = handler.dataver();
+
+        handler.report(41);
+        assert_eq!(
+            handler.dataver(),
+            reported,
+            "one percent is converter noise, and reporting it would wake the radio"
+        );
+
+        handler.report(40);
+        assert_eq!(handler.dataver(), reported);
+    }
+
+    #[test]
+    fn a_reading_that_moved_enough_is_reported() {
+        let handler = handler();
+        handler.report(40);
+        let reported = handler.dataver();
+
+        handler.report(42);
+        assert_ne!(handler.dataver(), reported, "the deadband was crossed");
+    }
+
+    #[test]
+    fn a_slow_trend_accumulates_until_it_crosses_the_deadband() {
+        let handler = handler();
+        handler.report(40);
+        let reported = handler.dataver();
+
+        // Each step is below the deadband, but they add up, because the
+        // comparison is against the last *reported* value rather than the last
+        // sample.
+        handler.report(41);
+        handler.report(42);
+        assert_ne!(
+            handler.dataver(),
+            reported,
+            "a trend that has moved far enough is worth reporting"
+        );
     }
 }

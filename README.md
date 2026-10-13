@@ -20,6 +20,17 @@ This is a from-scratch Rust port, not a line-for-line translation, and it
 deliberately does not match every feature of the C++ original. See
 [Known limitations](#known-limitations) below before flashing.
 
+## Documentation
+
+| | |
+|---|---|
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | the layering idea, and where a change belongs |
+| [`docs/design.md`](docs/design.md) | how this firmware is put together |
+| [`docs/hardware.md`](docs/hardware.md) | the board, and the things about it that bite |
+| [`docs/matter.md`](docs/matter.md) | the Matter side, and what the radio costs |
+| [`docs/testing.md`](docs/testing.md) | tests, and the simulator |
+| [`docs/building.md`](docs/building.md) | building, flashing, and the platform traps |
+
 ## Features
 
 - Matter over Thread, BLE-concurrent commissioning (`EmbassyThreadMatterStack`,
@@ -28,24 +39,30 @@ deliberately does not match every feature of the C++ original. See
   below).
 - Battery-shaped `PowerSource` cluster reporting battery %, voltage and an
   estimated time remaining from the voltage trend over the last 24 h, available
-  after 4 h of uptime (hand-written handler - see below).
+  after 4 h of uptime (hand-written handler - see below). The trend lives in RTC
+  RAM, so it survives the reboots a deep-sleeping device makes.
 - Button: single press samples now, triple click starts the dry/wet
   calibration flow, a 10 s hold factory-resets (erases the Matter fabric and
-  reboots).
+  reboots). The button also wakes the device from deep sleep.
 - Three status LEDs: moisture classification blink (red/yellow/green) and
   calibration-flow feedback.
 - Dry/wet calibration persisted to its own flash partition, independent of
   Matter's own fabric/session persistence - a factory reset does not force a
   recalibration, and vice versa.
-- Periodic background sampling (every 30 s), reporting only when a reading
-  moved enough to matter, so ADC jitter does not wake the Thread radio.
+- Background sampling (every 30 s, and once immediately after boot), reporting
+  only when a reading moved enough to matter, so ADC jitter does not wake the
+  Thread radio.
 - Thread Sleepy End Device with an adaptive duty cycle owned by `rs-matter`'s
-  ICD state machine (`EmbassyThread::with_icd`): the receiver is off between
-  data polls, idling at the SIT period (`THREAD_SIT_POLL_PERIOD_MS`) or the
-  longer LIT period (`THREAD_LIT_POLL_PERIOD_MS`) following the controller's ICD
-  registration, and polling at `THREAD_ACTIVE_POLL_PERIOD_MS` for
-  `THREAD_ACTIVE_HOLD_MS` after boot, any Matter message, an ICD
-  stay-active request, a button press, or while commissioning.
+  ICD state machine: the receiver is off between data polls, idling at the
+  short-idle period or the long-idle one following the controller's ICD
+  registration, and polling fast for the active window after boot, any Matter
+  message, an ICD stay-active request, a button press, or while commissioning.
+  The numbers are in `core/src/tuning.rs`.
+- **MCU deep sleep while operating as a LIT**: once the
+  device is idle and has taken its reading, the CPU, RAM and every APB-clocked
+  peripheral are powered off until the next wake-up is due. The datasheet puts
+  deep sleep at ~7 uA against ~17 mA for an idle CPU, so this is the difference
+  between days and years on a cell - see [Power](#power).
 - LIT ICD: hosts the Matter ICD Management cluster on endpoint 0 through
   `rs-matter`'s `LitIcdMgmtHandler`/`LitIcd`, which sends the Check-In sweep to
   registered clients whose subscription has lapsed, honors `StayActiveRequest`
@@ -53,80 +70,101 @@ deliberately does not match every feature of the C++ original. See
 
 ### Why hand-written cluster handlers?
 
-`rs-matter` code-generates the raw attribute plumbing for every cluster in
-the bundled Matter IDL, including `SoilMeasurement` (it's `provisional` but
-present), but ships no ergonomic handler for it - unlike `OnOff` or
-`Descriptor`. Likewise, `rs_matter::dm::clusters::power_source::PowerSourceHandler`
-implements only the minimal conformant *wired* shape (`Feature::WIRED`); the
-battery attributes always answer `AttributeNotFound`. `src/clusters/`
-hand-writes both, following the exact pattern `rs_matter::dm::clusters::desc::DescHandler`
-uses: `pub use decl::<cluster>::*` for the generated types, then a
-hand-written `impl ClusterHandler`.
+`rs-matter` ships no ergonomic handler for `SoilMeasurement`, and its built-in
+`PowerSourceHandler` is hardcoded to the *wired* feature. Both are written by
+hand here - see [`docs/matter.md`](docs/matter.md).
+
+## Power
+
+The device is a Long Idle Time ICD, and it deep-sleeps between wake-ups. While no
+controller has registered for Check-Ins it operates as a Short Idle Time device
+instead and **never sleeps**, because it has to stay reachable within seconds.
+
+The budget is dominated by the ten-second window it must stay awake after each
+wake-up - long enough to attach to Thread, announce itself and take a reading.
+That works out at roughly **1.4 years on a 2500 mAh AA**, and that number is a
+*model* computed by `make sim`, not a measurement.
+
+[`docs/matter.md`](docs/matter.md) has the duty cycle, the table, and what the
+model leaves out.
 
 ## Known limitations
 
 Deliberately out of scope for this port (all present in the C++ original):
 
 - **Matter OTA over Thread.** No OTA partitions or requestor.
-- **Battery sag / internal-resistance health measurement.** Only resting
-  voltage is reported; the LED-load-based health check is not implemented.
+- **Battery sag / internal-resistance health measurement.** Only resting voltage
+  is reported; the LED-load-based health check is not implemented.
 - **Brownout diagnostics.**
 
-One constraint discovered during the port, not present in the C++ original
-(ESP-IDF's driver model handles this transparently):
+Consequences of the deep-sleeping LIT profile (see [Power](#power)):
 
-- **The RNG and the sensors share one ADC unit.** The XIAO ESP32-C6 has
-  exactly one ADC unit, and `esp-hal`'s `TrngSource` (which supplements the
-  hardware RNG with ADC noise for cryptographic-quality randomness) claims
-  it exclusively for as long as it's alive - an explicitly
-  `#[instability::unstable]` API with a `TODO: a single ADC channel should
-  be sufficient` in its own source. This firmware seeds Matter's CSPRNG
-  once from true hardware entropy at boot, then releases the ADC for the
-  soil probe and battery sensor for the rest of the device's uptime,
-  forgoing `rs-matter-stack`'s default periodic HW-entropy reseeding.
-  Seed-once-then-run is a standard, broadly accepted practice for embedded
-  CSPRNGs, but it is a weaker guarantee than continuous hardware reseeding -
-  worth knowing given this device also handles Matter commissioning key
-  material. Revisit if/when `esp-hal` narrows `TrngSource` to a single ADC
-  channel.
+- **A controller that does not implement LIT gets SIT behaviour.** LIT was only
+  certifiable from Matter 1.4, and controller support has been slower still, so
+  the device falls back to polling every 15 s and never deep-sleeps. Expect the
+  SIT-rate battery life on such a controller, not the figures above.
+- **Two fabrics is a trap.** The device flips to LIT as soon as *either*
+  controller registers for Check-Ins, which leaves the other ecosystem unable to
+  reach it. See [`docs/matter.md`](docs/matter.md).
+- **Commands and OTA are deferred.** The device is unreachable for up to one idle
+  period at a time, so anything a controller writes to it lands at the next
+  wake-up. That is fine for a sensor and not fine for anything a user expects to
+  react to - which is why this is a LIT device and not a SIT one.
+- **The idle period is fixed at build time.** One number is both the advertised
+  idle interval and the deep-sleep length, and there is no runtime knob.
+- **The active window is the energy budget.** It has to cover the Thread attach
+  and the Check-In exchange on a real network, and it is set by reasoning rather
+  than measured on this board.
+
+One constraint discovered during the port, not present in the C++ original:
+
+- **The RNG and the sensors share one ADC unit**, so the firmware seeds its
+  CSPRNG once at boot and then releases the ADC for the probe and the battery.
+  That is a weaker guarantee than continuous hardware reseeding. The full
+  reasoning is in [`docs/hardware.md`](docs/hardware.md).
 
 ## Hardware
 
-Seeed XIAO ESP32-C6, 4 MB flash. Pin map (`src/pins.rs`, mirrors the
-original firmware's `app_priv.h`):
+A Seeed XIAO ESP32-C6 with the soil-moisture carrier: a capacitive probe, three
+status LEDs, a button and an AA holder.
 
-| GPIO | Function |
-|---|---|
-| 0 | Battery voltage ADC |
-| 1 | Soil probe ADC |
-| 2 | User button (active low) |
-| 3 | RF switch enable (drive low) |
-| 14 | Antenna select (drive high, external U.FL) |
-| 18 | Yellow LED |
-| 19 | Green LED |
-| 20 | Red LED |
-| 21 | Soil probe excitation PWM |
+The pin map, and the constraints that are easy to break by accident - the
+button's GPIO range, the ADC that the radio's entropy source shares, the flash
+partitions - are in [`docs/hardware.md`](docs/hardware.md).
 
 ## Building and flashing
 
 Requires the `nightly` toolchain with `rust-src` (pinned in
-`rust-toolchain.toml`) and [`espflash`](https://github.com/esp-rs/espflash)
-on `PATH`.
+`rust-toolchain.toml`) and [`espflash`](https://github.com/esp-rs/espflash) on
+`PATH`.
 
 ```sh
-make build           # cargo build (debug)
-make build-release    # cargo build --release
-make flash            # build + flash + monitor (debug)
-make flash-release    # build + flash + monitor (release)
-make monitor           # attach to an already-flashed board
-make test              # host-side unit tests (pure calibration/percent math)
-make lint               # cargo clippy
-make fmt                 # cargo fmt
+make build            # firmware, debug
+make build-release    # firmware, release
+make flash            # build + flash + monitor
+make monitor          # attach to an already-flashed board
+make test             # the host test suites
+make sim              # run the behaviour against a scripted world, no hardware
+make lint             # cargo clippy, for the device and for the host
 ```
 
-`espflash.toml` points flashing at the custom `partitions.csv` (Matter
-state, calibration, and a single non-OTA app partition - see that file for
-the layout and rationale).
+The platform traps - macOS needing a riscv-capable clang, why host commands must
+clear `-Zbuild-std`, and why the dependencies are target-gated - are in
+[`docs/building.md`](docs/building.md).
+
+### Running it without a board
+
+```sh
+make sim ARGS="--days 30"
+```
+```
+30.0 simulated days | awake 8.3 h (1.154%) | asleep 711.7 h | average 203.1 uA | ~1.4 years on a 2500 mAh AA
+2850 boots | 2850 soil reports | 2850 battery reports | 2850 reboot-count writes
+```
+
+It drives the same boot loop the firmware runs, against a scripted world whose
+clock only moves when the code asks it to. See
+[`docs/testing.md`](docs/testing.md) for what it can and cannot tell you.
 
 ## Commissioning
 
@@ -135,6 +173,16 @@ Home Assistant OTBR, or a dedicated RCP) and a Matter controller willing to
 commission an uncertified test-credential device. Commission it the same
 way you would any Matter-over-Thread accessory; expect an "uncertified
 device" warning, which is expected (see the disclaimer above).
+
+## Where things live
+
+The firmware is four crates, split by what each one is allowed to know: the
+device's behaviour (no hardware, no protocol, no clock), the Matter node, the
+peripherals and wiring, and a simulation of the peripherals. Dependencies point
+one way, and the same boot loop runs against the real peripherals and the
+simulated ones.
+
+[`docs/design.md`](docs/design.md) has the picture and the reasoning.
 
 ## Credits
 

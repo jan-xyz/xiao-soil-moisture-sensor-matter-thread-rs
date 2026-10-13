@@ -1,0 +1,32 @@
+[package]
+name = "soil-sensor-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Simulation layer: a scripted world, and the driver that walks boots through it."
+
+[lib]
+name = "soil_sensor_sim"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sim"
+path = "src/bin/sim.rs"
+
+[dependencies]
+soil-sensor-core = { path = "../core" }
+soil-sensor-node = { path = "../node" }
+
+# `os` is the one place in the tree where the protocol stack is allowed to pull
+# in `std` and an OS socket layer. It is what supplies the time driver and the
+# critical-section implementation a host test binary needs to link, and this
+# crate is host-only and outside `default-members`, so it can never reach the
+# firmware build. See `ARCHITECTURE.md`.
+rs-matter = { version = "0.4", default-features = false, features = ["log", "os"] }
+
+embassy-sync = "0.8"
+embassy-futures = "0.1"
+embassy-time = { version = "0.5", features = ["std"] }
+embassy-time-queue-utils = { version = "0.3", features = ["generic-queue-64"] }
+log = "0.4"
+env_logger = "0.11"

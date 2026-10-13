@@ -1,12 +1,8 @@
-//! Pure calculation logic, split out from the hardware-dependent binary.
+//! The plain arithmetic, and the one piece of state it keeps.
 //!
-//! The binary is `#![no_std]`/`#![no_main]` and depends on `esp-hal`, which
-//! does not build for the host target - so anything worth unit-testing
-//! under `cargo test` on the host lives here instead, in a lib crate the
-//! binary depends on implicitly (same package, standard Cargo lib+bin
-//! linkage). `no_std` only when not under `cargo test`, so the host test
-//! harness (which needs `std`) still works.
-#![cfg_attr(not(test), no_std)]
+//! Nothing here reads a clock, a pin or a byte of flash, so all of it is
+//! exercised on the host. That is the pattern the rest of the decision layer
+//! follows: if a calculation can be written without the world, it is.
 
 /// Linear interpolation between the wet (low mV) and dry (high mV)
 /// soil-probe calibration references, clamped to 0-100%.
@@ -48,11 +44,24 @@ pub fn should_report(last_reported: Option<u32>, current: u32, min_delta: u32) -
 /// The estimate is a least-squares line through the samples, so ADC jitter
 /// between single readings averages out. An alkaline cell does not discharge
 /// linearly: the estimate follows the recent trend, not the full curve.
+///
+/// The layout is deliberately plain data - no `Option`, no tuples, no
+/// padding - so the binary can place it in RTC RAM and have it survive the
+/// deep-sleep reboots a LIT device makes. The binary is the only place that
+/// knows about that; see `battery.rs`.
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct DischargeHistory<const N: usize> {
-    samples: [(u32, i32); N],
-    len: usize,
-    next: usize,
-    last_s: Option<u32>,
+    sample_s: [u32; N],
+    sample_mv: [i32; N],
+    /// Number of valid samples, `0..=N`.
+    len: u32,
+    /// Where the next sample goes.
+    next: u32,
+    /// The time of the last recorded sample; only meaningful while
+    /// `has_last` is non-zero.
+    last_s: u32,
+    has_last: u32,
     interval_s: u32,
     replaced_rise_mv: i32,
 }
@@ -63,31 +72,49 @@ impl<const N: usize> DischargeHistory<N> {
     /// and clears the history.
     pub const fn new(interval_s: u32, replaced_rise_mv: i32) -> Self {
         Self {
-            samples: [(0, 0); N],
+            sample_s: [0; N],
+            sample_mv: [0; N],
             len: 0,
             next: 0,
-            last_s: None,
+            last_s: 0,
+            has_last: 0,
             interval_s,
             replaced_rise_mv,
         }
     }
 
+    /// How many samples the trend currently holds.
+    pub fn len(&self) -> usize {
+        (self.len as usize).min(N)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn push(&mut self, now_s: u32, mv: i32) {
-        let highest_mv = self.samples[..self.len].iter().map(|&(_, mv)| mv).max();
+        // Clamped rather than trusted: this can live in RTC RAM, where a reset
+        // that outran the guard in `battery.rs` can leave any bit pattern.
+        let len = (self.len as usize).min(N);
+
+        let highest_mv = self.sample_mv[..len].iter().copied().max();
         if matches!(highest_mv, Some(highest_mv) if mv > highest_mv + self.replaced_rise_mv) {
             self.len = 0;
             self.next = 0;
-            self.last_s = None;
+            self.has_last = 0;
         }
 
-        if matches!(self.last_s, Some(last_s) if now_s.saturating_sub(last_s) < self.interval_s) {
+        if self.has_last != 0 && now_s.saturating_sub(self.last_s) < self.interval_s {
             return;
         }
 
-        self.samples[self.next] = (now_s, mv);
-        self.next = (self.next + 1) % N;
-        self.len = (self.len + 1).min(N);
-        self.last_s = Some(now_s);
+        let next = (self.next as usize) % N;
+        self.sample_s[next] = now_s;
+        self.sample_mv[next] = mv;
+        self.next = (next as u32 + 1) % N as u32;
+        self.len = ((self.len as usize).min(N) + 1).min(N) as u32;
+        self.last_s = now_s;
+        self.has_last = 1;
     }
 
     /// Seconds until the fitted voltage line reaches `empty_mv`. `None` until
@@ -100,24 +127,28 @@ impl<const N: usize> DischargeHistory<N> {
         min_span_s: u32,
         min_drop_mv: i32,
     ) -> Option<u32> {
-        let samples = &self.samples[..self.len];
-        let first_s = samples.iter().map(|&(t, _)| t).min()?;
-        let last_s = samples.iter().map(|&(t, _)| t).max()?;
+        let len = (self.len as usize).min(N);
+        let times = &self.sample_s[..len];
+        let first_s = times.iter().copied().min()?;
+        let last_s = times.iter().copied().max()?;
         let span_s = last_s - first_s;
         if span_s < min_span_s || span_s == 0 {
             return None;
         }
 
-        let n = samples.len() as i64;
-        let mean_t = samples
+        let n = len as i64;
+        let mean_t = times.iter().map(|&t| i64::from(t - first_s)).sum::<i64>() / n;
+        let mean_mv = self.sample_mv[..len]
             .iter()
-            .map(|&(t, _)| i64::from(t - first_s))
+            .map(|&mv| i64::from(mv))
             .sum::<i64>()
             / n;
-        let mean_mv = samples.iter().map(|&(_, mv)| i64::from(mv)).sum::<i64>() / n;
-        let (cov, var) = samples.iter().fold((0i64, 0i64), |(cov, var), &(t, mv)| {
-            let dt = i64::from(t - first_s) - mean_t;
-            (cov + dt * (i64::from(mv) - mean_mv), var + dt * dt)
+        let (cov, var) = (0..len).fold((0i64, 0i64), |(cov, var), i| {
+            let dt = i64::from(times[i] - first_s) - mean_t;
+            (
+                cov + dt * (i64::from(self.sample_mv[i]) - mean_mv),
+                var + dt * dt,
+            )
         });
         if var == 0 {
             return None;
@@ -133,15 +164,6 @@ impl<const N: usize> DischargeHistory<N> {
 
         Some(remaining_s.clamp(0, i64::from(u32::MAX)) as u32)
     }
-}
-
-/// Whether the node may use the long LIT poll period: only when it has at least
-/// one fabric and every fabric has a registered ICD client. A controller that
-/// did not register (e.g. Home Assistant) expects SIT responsiveness and cannot
-/// reach a node that polls only every LIT period.
-pub fn every_fabric_has_icd_client(fabric_registrations: impl IntoIterator<Item = usize>) -> bool {
-    let mut fabrics = fabric_registrations.into_iter().peekable();
-    fabrics.peek().is_some() && fabrics.all(|registrations| registrations > 0)
 }
 
 #[cfg(test)]
@@ -442,53 +464,6 @@ mod tests {
 
             let result =
                 history.time_remaining_s(input_empty_mv, input_min_span_s, input_min_drop_mv);
-            assert_eq!(result, expected, "Failed case: '{name}'");
-        }
-    }
-
-    struct IcdClientTestCase {
-        name: &'static str,
-        input_fabric_registrations: &'static [usize],
-        expected: bool,
-    }
-
-    #[test]
-    fn test_every_fabric_has_icd_client() {
-        let test_cases = vec![
-            IcdClientTestCase {
-                name: "no fabrics stays in SIT",
-                input_fabric_registrations: &[],
-                expected: false,
-            },
-            IcdClientTestCase {
-                name: "single fabric without a client stays in SIT",
-                input_fabric_registrations: &[0],
-                expected: false,
-            },
-            IcdClientTestCase {
-                name: "single fabric with a client allows LIT",
-                input_fabric_registrations: &[1],
-                expected: true,
-            },
-            IcdClientTestCase {
-                name: "one fabric without a client stays in SIT",
-                input_fabric_registrations: &[1, 0],
-                expected: false,
-            },
-            IcdClientTestCase {
-                name: "every fabric with clients allows LIT",
-                input_fabric_registrations: &[2, 1],
-                expected: true,
-            },
-        ];
-
-        for IcdClientTestCase {
-            name,
-            input_fabric_registrations,
-            expected,
-        } in test_cases
-        {
-            let result = every_fabric_has_icd_client(input_fabric_registrations.iter().copied());
             assert_eq!(result, expected, "Failed case: '{name}'");
         }
     }

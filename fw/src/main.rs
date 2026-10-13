@@ -1,0 +1,478 @@
+//! The composition root: the only place that knows every layer.
+//!
+//! It builds the peripherals, wires them into the decision layer through the
+//! device layer's ports, runs one boot, and performs whatever that boot asked
+//! for. It holds no policy of its own - see `ARCHITECTURE.md`, and the tuning
+//! module in the decision layer, for where the numbers live.
+//!
+//! The task graph is small on purpose: the protocol stack, the boot loop, and
+//! the two sources that must never miss an event while the boot loop is busy.
+
+#![no_std]
+#![no_main]
+#![recursion_limit = "256"]
+
+use core::pin::pin;
+
+use embassy_embedded_hal::adapter::{BlockingAsync, YieldingAsync};
+use embassy_executor::Spawner;
+use embassy_futures::join::join;
+use embassy_futures::select::{select3, Either3};
+use embassy_sync::channel::Channel;
+use embassy_sync::mutex::Mutex;
+
+use esp_alloc::heap_allocator;
+use esp_backtrace as _;
+use esp_bootloader_esp_idf::partitions::{
+    read_partition_table, DataPartitionSubType, PartitionType, PARTITION_TABLE_MAX_LEN,
+};
+use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcConfig, Attenuation};
+use esp_hal::gpio::{Flex, Level, Output, OutputConfig};
+use esp_hal::ledc::channel::{self, ChannelIFace};
+use esp_hal::ledc::timer::{self, TimerIFace};
+use esp_hal::ledc::{LSGlobalClkSource, Ledc, LowSpeed};
+use esp_hal::ram;
+use esp_hal::rtc_cntl::sleep::{LowPower, RtcSleepConfig};
+use esp_hal::rtc_cntl::{wakeup_cause, Rtc, WakeupSource};
+use esp_hal::timer::timg::TimerGroup;
+use esp_metadata_generated::memory_range;
+use esp_storage::FlashStorage;
+
+use log::{info, warn};
+
+use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
+use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
+use rs_matter_embassy::matter::dm::clusters::decl::soil_measurement::ClusterHandler as _;
+use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
+use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{
+    ClusterHandler as _, IcdModeConfig, LitIcd, LitIcdMgmtHandler,
+};
+use rs_matter_embassy::matter::dm::devices::test::{
+    DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
+};
+use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ROOT_NODE;
+use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
+use rs_matter_embassy::matter::dm::{Async, Cluster, Dataver, EmptyHandler, Endpoint, Node};
+use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
+use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
+use rs_matter_embassy::persist::SeqMapKvBlobStore;
+use rs_matter_embassy::stack::rand::rand_core::SeedableRng;
+use rs_matter_embassy::stack::rand::ChaCha12Rng;
+use rs_matter_embassy::wireless::esp::EspThreadDriver;
+use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
+
+use soil_sensor_core::app::{run_boot, Boot};
+use soil_sensor_core::ports::{Outcome, Ports as _, WakeCause};
+use soil_sensor_core::tuning;
+use soil_sensor_node::{
+    BatteryCell, PowerSourceHandler, SoilMeasurementHandler, SoilMoistureCell, DEV_TYPE_SOIL_SENSOR,
+};
+
+use tinyrlibc as _;
+
+extern crate alloc;
+
+mod battery;
+mod board;
+mod button;
+mod flash;
+mod leds;
+mod ports;
+mod probe;
+mod store;
+
+use battery::Battery;
+use flash::{SharedFlash, SharedFlashBus};
+use leds::StatusLeds;
+use ports::EspPorts;
+use probe::SoilProbe;
+
+macro_rules! mk_static {
+    ($t:ty) => {{
+        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+        STATIC_CELL.uninit()
+    }};
+}
+
+/// See the reference example for the rationale on this sizing; retuned upward
+/// because this device hosts two hand-written cluster handlers and the boot loop.
+const BUMP_SIZE: usize = 24000;
+
+/// Heap for Thread+BLE plus the boot loop's own allocations.
+const HEAP_SIZE: usize = 110 * 1024;
+
+const RECLAIMED_RAM: usize =
+    memory_range!("DRAM2_UNINIT").end - memory_range!("DRAM2_UNINIT").start;
+
+esp_bootloader_esp_idf::esp_app_desc!();
+
+static SOIL_MOISTURE: SoilMoistureCell = SoilMoistureCell::new();
+static BATTERY: BatteryCell = BatteryCell::new();
+
+static LED_CHANNEL: leds::LedChannel = Channel::new();
+static EDGE_CHANNEL: button::EdgeChannel = Channel::new();
+
+/// Endpoint 0 (the root endpoint) always runs the hidden Matter system
+/// clusters, so the sensor endpoint gets ID 1.
+const SOIL_ENDPOINT_ID: u16 = 1;
+
+/// The advertised `SAI`/`SII` (session active/idle intervals) *and* the polling
+/// intervals of the Thread Sleepy End Device: the protocol stack's ICD state
+/// machine feeds them to the driver, which maps them onto the OpenThread
+/// data-poll period. `SII` is the long-idle interval; the stack caps it to the
+/// short-idle poll (and advertises that) while the device operates as one.
+const BASIC_INFO: BasicInfoConfig = BasicInfoConfig {
+    sai: Some(tuning::ACTIVE_POLL_PERIOD_MS),
+    sii: Some(tuning::LIT_POLL_PERIOD_MS),
+    ..TEST_DEV_DET
+};
+
+/// The ICD Management cluster metadata, exactly as served by
+/// [`LitIcdMgmtHandler`].
+const ICD_MGMT_CLUSTER: Cluster<'static> = LitIcdMgmtHandler::CLUSTER;
+
+/// The ICD Management cluster lives on the root endpoint. `root_endpoint!`
+/// cannot forward extra clusters, but the `clusters!(thread ; ...)` form can, so
+/// the endpoint is spelled out here. Keeping the ICD state and handler app-local
+/// is what lets the decision layer be told about it through a port.
+const ROOT_ENDPOINT: Endpoint<'static> = Endpoint {
+    id: ROOT_ENDPOINT_ID,
+    device_types: devices!(DEV_TYPE_ROOT_NODE),
+    clusters: clusters!(thread ; ICD_MGMT_CLUSTER),
+    client_clusters: &[],
+    unique_id: None,
+    semantic_tags: &[],
+};
+
+/// The reachability profile the device advertises, from the decision layer's
+/// tuning.
+const ICD_MODE: IcdModeConfig = IcdModeConfig {
+    idle_mode_duration_s: tuning::LIT_IDLE_MODE_DURATION_SECS,
+    active_mode_duration_ms: tuning::ACTIVE_HOLD.as_millis() as u32,
+    active_mode_threshold_ms: tuning::ACTIVE_THRESHOLD_MS,
+    user_active_mode_trigger_hint: 0,
+    user_active_mode_trigger_instruction: "",
+};
+
+const NODE: Node = Node {
+    endpoints: &[
+        ROOT_ENDPOINT,
+        Endpoint::new(
+            SOIL_ENDPOINT_ID,
+            devices!(DEV_TYPE_SOIL_SENSOR),
+            clusters!(
+                desc::DescHandler::CLUSTER,
+                SoilMeasurementHandler::CLUSTER,
+                soil_sensor_node::power_source::CLUSTER
+            ),
+        ),
+    ],
+};
+
+#[esp_rtos::main]
+async fn main(_s: Spawner) {
+    esp_println::logger::init_logger_from_env();
+    info!("Starting...");
+
+    heap_allocator!(size: HEAP_SIZE - RECLAIMED_RAM);
+    heap_allocator!(#[ram(reclaimed)] size: RECLAIMED_RAM);
+
+    let mut peripherals = esp_hal::init(esp_hal::Config::default());
+
+    // A long-idle device spends most of its life asleep, and a wake-up is a
+    // reboot - so "why did this boot happen" is the first thing worth knowing.
+    let wake_cause = wakeup_cause();
+    let wake = if wake_cause.is_empty() {
+        info!("Cold boot");
+        WakeCause::Cold
+    } else if wake_cause.contains(WakeupSource::Gpio) {
+        info!("Woken up by the button");
+        WakeCause::Button
+    } else {
+        info!("Woken up from deep sleep by the timer");
+        WakeCause::Timer
+    };
+
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    esp_rtos::start(timg0.timer0);
+
+    // Antenna/RF-switch setup, driven once at boot and held for the firmware's
+    // lifetime.
+    let _rf_switch_en = Output::new(
+        peripherals.GPIO3.reborrow(),
+        Level::Low,
+        OutputConfig::default(),
+    );
+    let _antenna_sel = Output::new(
+        peripherals.GPIO14.reborrow(),
+        Level::High,
+        OutputConfig::default(),
+    );
+
+    // The protocol stack needs a cryptographically-secure RNG for its whole
+    // operational lifetime, and on this chip that requires exclusive access to
+    // ADC1 (see README's "Known limitations"). Seed a software CSPRNG from true
+    // hardware entropy once, then release ADC1 for the sensors.
+    let trng_source =
+        esp_hal::rng::TrngSource::new(peripherals.RNG.reborrow(), peripherals.ADC1.reborrow());
+    let mut seed = [0u8; 32];
+    {
+        let trng = esp_hal::rng::Trng::try_new().unwrap();
+        trng.read(&mut seed);
+    }
+    core::mem::drop(trng_source);
+
+    let crypto = default_crypto(ChaCha12Rng::from_seed(seed), DAC_PRIVKEY);
+
+    let mut weak_rand = crypto.weak_rand().unwrap();
+    let discriminator = (weak_rand.next_u32() & 0xfff) as u16;
+
+    // Must be stable across reboots: Thread's SRP client registers services
+    // keyed by identifiers tied to this EUI64, and a fresh random one each boot
+    // makes the same service look like a new host (see AGENTS.md).
+    let ieee_eui64 = EspThreadDriver::ieee_eui64();
+
+    // ADC1 is free now: one config hosts both the soil probe and the battery
+    // channel, matching the board's shared-ADC-unit constraint.
+    let mut adc_config = AdcConfig::new();
+    let battery_pin = adc_config
+        .enable_pin_with_cal::<_, AdcCalCurve<_>>(peripherals.GPIO0.reborrow(), Attenuation::_11dB);
+    let soil_pin = adc_config
+        .enable_pin_with_cal::<_, AdcCalCurve<_>>(peripherals.GPIO1.reborrow(), Attenuation::_11dB);
+    let adc = Adc::new(peripherals.ADC1.reborrow(), adc_config).into_async();
+
+    // Excitation PWM for the soil probe, idle (0% duty) until a measurement is
+    // taken. 6-bit duty rather than the original firmware's 8-bit: the divisor
+    // formula undershoots the valid range at 200 kHz / 8-bit unless the APB
+    // clock is exactly 80 MHz (see AGENTS.md).
+    let mut ledc = Ledc::new(peripherals.LEDC.reborrow());
+    ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
+    let mut excitation_timer = ledc.timer::<LowSpeed>(timer::Number::Timer0);
+    excitation_timer
+        .configure(timer::config::Config {
+            duty: timer::config::Duty::Duty6Bit,
+            clock_source: timer::LSClockSource::APBClk,
+            frequency: esp_hal::time::Rate::from_khz(tuning::SOIL_EXCITATION_FREQ_KHZ),
+        })
+        .unwrap();
+    let mut excitation_channel =
+        ledc.channel(channel::Number::Channel0, peripherals.GPIO21.reborrow());
+    excitation_channel
+        .configure(channel::config::Config {
+            timer: &excitation_timer,
+            duty_pct: 0,
+            drive_mode: esp_hal::gpio::DriveMode::PushPull,
+        })
+        .unwrap();
+
+    let soil_probe = SoilProbe::new(excitation_channel, soil_pin);
+    let battery = Battery::new(battery_pin);
+
+    let status_leds = StatusLeds::new(
+        Output::new(
+            peripherals.GPIO20.reborrow(),
+            Level::Low,
+            OutputConfig::default(),
+        ),
+        Output::new(
+            peripherals.GPIO18.reborrow(),
+            Level::Low,
+            OutputConfig::default(),
+        ),
+        Output::new(
+            peripherals.GPIO19.reborrow(),
+            Level::Low,
+            OutputConfig::default(),
+        ),
+    );
+
+    // The button task finishes the pin setup, including the deep-sleep wake
+    // configuration - see `button.rs`.
+    let button_input = Flex::new(peripherals.GPIO2.reborrow());
+
+    // The RTC clock keeps counting across deep sleep; it is the time base for
+    // anything that has to stay ordered across wake-ups.
+    let rtc = Rtc::new(peripherals.RTC_TIMER);
+
+    // Restore the retained state from RTC RAM before anything reads it.
+    store::init_trend();
+
+    // Flash: one physical peripheral, shared between the protocol stack's own
+    // persistence and the calibration store (see `flash.rs`).
+    let mut flash_storage = FlashStorage::new(peripherals.FLASH.reborrow());
+    let mut pt_buf = [0u8; PARTITION_TABLE_MAX_LEN];
+    let pt = read_partition_table(&mut flash_storage, &mut pt_buf).unwrap();
+
+    let nvs = pt
+        .find_partition(PartitionType::Data(DataPartitionSubType::Nvs))
+        .unwrap()
+        .unwrap();
+    let nvs_range = nvs.offset()..(nvs.offset() + nvs.len());
+
+    let calib = pt.iter().find(|p| p.label_as_str() == "calib").unwrap();
+    let calibration_range = calib.offset()..(calib.offset() + calib.len());
+
+    let flash_bus: SharedFlashBus =
+        Mutex::new(YieldingAsync::new(BlockingAsync::new(flash_storage)));
+
+    // Allocate the protocol stack statically - mandatory for the wireless stack
+    // variation, and it avoids blowing the program stack.
+    let stack = mk_static!(EmbassyThreadMatterStack::<BUMP_SIZE, ()>).init_with(
+        EmbassyThreadMatterStack::init(
+            &BASIC_INFO,
+            BasicCommData {
+                password: TEST_DEV_COMM.password,
+                discriminator,
+            },
+            &TEST_DEV_ATT,
+        ),
+    );
+
+    let soil_handler = SoilMeasurementHandler::new(
+        SOIL_ENDPOINT_ID,
+        Dataver::new_rand(&mut weak_rand),
+        &SOIL_MOISTURE,
+    );
+    let power_handler = PowerSourceHandler::new(
+        SOIL_ENDPOINT_ID,
+        Dataver::new_rand(&mut weak_rand),
+        &BATTERY,
+    );
+
+    // The shared long-idle state: the registrations, the check-in counter and
+    // the power mode state machine. Statically allocated, because the handler
+    // needs a `'static` reference and the registration array must not transit
+    // the stack.
+    let lit: &'static LitIcd = mk_static!(LitIcd).init_with(LitIcd::init(
+        tuning::CHECK_IN_COUNTER_EPOCH,
+        ICD_MODE,
+        tuning::SIT_POLL_PERIOD_MS,
+    ));
+    let icd = lit.icd();
+
+    let mut lpwr = LowPower::new(peripherals.LPWR.reborrow());
+
+    // NB: `EmptyHandler::chain` wraps LIFO - the *last* chained matcher is
+    // evaluated first. The broad root matcher must be chained BEFORE the ICD
+    // matcher, otherwise it claims every endpoint-0 cluster and answers ICD
+    // Management reads with `EndpointNotFound`.
+    let handler = EmptyHandler
+        .chain(
+            |e, _| e == ROOT_ENDPOINT_ID,
+            Async(EmbassyThreadMatterStack::<0, ()>::root_handler(
+                &(),
+                &mut weak_rand,
+            )),
+        )
+        .chain(
+            |e, c| e == ROOT_ENDPOINT_ID && c == ICD_MGMT_CLUSTER.id,
+            Async(LitIcdMgmtHandler::new(Dataver::new_rand(&mut weak_rand), lit).adapt()),
+        )
+        .chain(
+            |e, c| e == SOIL_ENDPOINT_ID && c == SoilMeasurementHandler::CLUSTER.id,
+            // `.adapt()` takes `self` by value; the boot loop also needs a
+            // reference to call `.report(...)`, so adapt a `&_`.
+            Async(soil_sensor_node::soil_measurement::HandlerAdaptor(
+                &soil_handler,
+            )),
+        )
+        .chain(
+            |e, c| e == SOIL_ENDPOINT_ID && c == soil_sensor_node::power_source::CLUSTER.id,
+            Async(soil_sensor_node::power_source::HandlerAdaptor(
+                &power_handler,
+            )),
+        )
+        .chain(
+            |e, c| e == SOIL_ENDPOINT_ID && c == desc::DescHandler::CLUSTER.id,
+            Async(desc::DescHandler::new(Dataver::new_rand(&mut weak_rand)).adapt()),
+        );
+
+    let mut store = SeqMapKvBlobStore::new(SharedFlash(&flash_bus), nvs_range);
+    stack.startup(&crypto, &mut store).await.unwrap();
+
+    if stack.matter().has_fabrics() {
+        info!(
+            "To reset, hold the button for {} s",
+            tuning::BUTTON_FACTORY_RESET_HOLD.as_secs()
+        );
+    }
+
+    let outcome = {
+        let kv = stack.matter().kv(&mut store);
+
+        let mut esp_ports = EspPorts {
+            soil: soil_probe,
+            battery,
+            adc,
+            leds: LED_CHANNEL.sender(),
+            edges: EDGE_CHANNEL.receiver(),
+            rtc: &rtc,
+            icd,
+            flash: SharedFlash(&flash_bus),
+            calibration_range,
+            soil_handler: &soil_handler,
+            power_handler: &power_handler,
+            matter: stack.matter(),
+            kv: &kv,
+            boot_at: embassy_time::Instant::now(),
+        };
+
+        let boot = Boot {
+            wake,
+            now: esp_ports.now(),
+        };
+
+        let matter = pin!(stack.run_coex(
+            EmbassyThread::new(
+                EspThreadDriver::new(peripherals.IEEE802154.reborrow(), peripherals.BT.reborrow())
+                    .with_rx_queue_size(board::THREAD_RX_QUEUE_SIZE),
+                crypto.rand().unwrap(),
+                ieee_eui64,
+                &kv,
+                stack,
+                true,
+            )
+            .with_icd(icd),
+            &crypto,
+            (NODE, &handler),
+            &kv,
+            (),
+        ));
+
+        // One boot, from power-up to whatever ends it. The same call, over the
+        // same ports, is what the simulation drives.
+        let boot_loop = pin!(run_boot(&mut esp_ports, boot));
+
+        // The two sources that must not miss an event while the boot loop is
+        // busy: the button (also the wake source) and the LEDs (a blink outlives
+        // the moment that asked for it).
+        let tasks = pin!(join(
+            button::run(button_input, EDGE_CHANNEL.sender()),
+            status_leds.run(LED_CHANNEL.receiver()),
+        ));
+
+        match select3(matter, boot_loop, tasks).await {
+            Either3::First(result) => {
+                result.unwrap();
+                unreachable!("the protocol stack does not end on its own")
+            }
+            Either3::Second(outcome) => outcome,
+            Either3::Third(_) => unreachable!("the device tasks never complete"),
+        }
+    };
+
+    match outcome {
+        Outcome::Sleep { for_ms } => {
+            // Never returns: the wake-up is a reboot.
+            lpwr.set_wakeup_deadline(
+                esp_hal::time::Instant::now() + esp_hal::time::Duration::from_millis(for_ms),
+            );
+            lpwr.sleep_deep(RtcSleepConfig::deep());
+        }
+        Outcome::FactoryReset => {}
+    }
+
+    warn!("Factory reset requested - erasing Matter fabric state and rebooting");
+    stack.reset(&crypto, (NODE, &handler), store).await.unwrap();
+    esp_hal::system::software_reset()
+}

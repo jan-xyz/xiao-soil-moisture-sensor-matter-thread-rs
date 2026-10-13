@@ -38,4 +38,9 @@ jobs:
       - uses: actions/checkout@v7
       - run: rustup show
       - uses: Swatinem/rust-cache@v2
+      # The decision and integration layers on the host, and the simulation that
+      # drives them through boots. None of it needs hardware.
       - run: make test
+      # And a smoke run of the simulator, which is also the check that the
+      # energy model still produces a sane number.
+      - run: make sim ARGS="--days 7"
