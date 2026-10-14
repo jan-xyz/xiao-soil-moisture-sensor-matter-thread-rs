@@ -3242,7 +3242,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "openthread"
 version = "0.4.0"
-source = "git+https://github.com/sysgrok/openthread?rev=fed54d2f765e2989741a9606e8b932d7fffcd5dc#fed54d2f765e2989741a9606e8b932d7fffcd5dc"
+source = "git+https://github.com/sysgrok/openthread?rev=41cfca398bb1d2d26deb6671e635ce262df4bfc9#41cfca398bb1d2d26deb6671e635ce262df4bfc9"
 dependencies = [
  "bitflags 2.13.2",
  "embassy-futures",
@@ -3259,7 +3259,7 @@ dependencies = [
 [[package]]
 name = "openthread-sys"
 version = "0.4.0"
-source = "git+https://github.com/sysgrok/openthread?rev=fed54d2f765e2989741a9606e8b932d7fffcd5dc#fed54d2f765e2989741a9606e8b932d7fffcd5dc"
+source = "git+https://github.com/sysgrok/openthread?rev=41cfca398bb1d2d26deb6671e635ce262df4bfc9#41cfca398bb1d2d26deb6671e635ce262df4bfc9"
 dependencies = [
  "anyhow",
  "bindgen 0.72.1",
@@ -3653,7 +3653,7 @@ dependencies = [
 [[package]]
 name = "rs-matter"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=f99b42f5dd7d4609da80b0facfa85e5e85b7644c#f99b42f5dd7d4609da80b0facfa85e5e85b7644c"
+source = "git+https://github.com/project-chip/rs-matter?rev=4d4fd3a2d821fb0105a340e244b10be44efd3646#4d4fd3a2d821fb0105a340e244b10be44efd3646"
 dependencies = [
  "async-io",
  "bitflags 2.13.2",
@@ -3692,7 +3692,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-codegen"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=f99b42f5dd7d4609da80b0facfa85e5e85b7644c#f99b42f5dd7d4609da80b0facfa85e5e85b7644c"
+source = "git+https://github.com/project-chip/rs-matter?rev=4d4fd3a2d821fb0105a340e244b10be44efd3646#4d4fd3a2d821fb0105a340e244b10be44efd3646"
 dependencies = [
  "convert_case 0.6.0",
  "miette",
@@ -3746,7 +3746,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-macros"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=f99b42f5dd7d4609da80b0facfa85e5e85b7644c#f99b42f5dd7d4609da80b0facfa85e5e85b7644c"
+source = "git+https://github.com/project-chip/rs-matter?rev=4d4fd3a2d821fb0105a340e244b10be44efd3646#4d4fd3a2d821fb0105a340e244b10be44efd3646"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",

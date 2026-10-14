@@ -25,12 +25,12 @@ opt-level = "s"
 # mode state machine, `LitIcd`/`LitIcdMgmtHandler`) lives on `rs-matter`'s main
 # branch, past the published `0.4.1` release that `rs-matter-stack` still
 # resolves to.
-rs-matter = { git = "https://github.com/project-chip/rs-matter", rev = "f99b42f5dd7d4609da80b0facfa85e5e85b7644c" }
+rs-matter = { git = "https://github.com/project-chip/rs-matter", rev = "4d4fd3a2d821fb0105a340e244b10be44efd3646" }
 # `sysgrok/openthread`'s `csl` branch adds the CSL (Coordinated Sampled
 # Listening) API (`set_csl_period`, `wait_radio_ready`, ...) and the `esp-radio`
 # 1.0.0-beta.1 `Ieee802154` sleep support the SED driver needs.
-openthread = { git = "https://github.com/sysgrok/openthread", rev = "fed54d2f765e2989741a9606e8b932d7fffcd5dc" }
-openthread-sys = { git = "https://github.com/sysgrok/openthread", rev = "fed54d2f765e2989741a9606e8b932d7fffcd5dc" }
+openthread = { git = "https://github.com/sysgrok/openthread", rev = "41cfca398bb1d2d26deb6671e635ce262df4bfc9" }
+openthread-sys = { git = "https://github.com/sysgrok/openthread", rev = "41cfca398bb1d2d26deb6671e635ce262df4bfc9" }
 # `ivmarkov/esp-hal`'s `ieee802154-sleep` branch: the `esp-radio` 1.0.0-beta.1
 # that `sysgrok/openthread` needs, plus `Ieee802154::stop_receive` /
 # `EspRadio::set_sleep` so the SED receiver is off between data polls.
