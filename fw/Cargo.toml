@@ -33,10 +33,11 @@ esp-storage = { version = "0.10", features = ["embedded-storage"] }
 esp-bootloader-esp-idf = { version = "0.6", features = ["log-04"] }
 esp-metadata-generated = "0.5"
 
-# Pinned to `sysgrok/rs-matter-embassy`'s `icd` branch (PR #87). The Thread SED
-# driver there follows the ICD power mode state machine that `rs-matter` itself
-# owns (`EmbassyThread::with_icd`) instead of an app-driven poll-period handle.
-rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev = "ff223e1046f067712e31aa3e9384c5ff5c9c3f11", default-features = false, features = [
+# Pinned to `sysgrok/rs-matter-embassy`'s `master`, where the ICD work has been
+# merged but not released. The Thread SED driver there follows the ICD power mode
+# state machine that `rs-matter` itself owns (`EmbassyThread::with_icd`) instead
+# of an app-driven poll-period handle.
+rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev = "603c709b85dab296482dc8702c8fd99568f98b99", default-features = false, features = [
   "esp",
   "log",
 ] }

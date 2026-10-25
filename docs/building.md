@@ -83,17 +83,26 @@ live, and where nothing device-specific may appear.
 
 ## The pinned forks
 
-`rs-matter-embassy` is pinned to `sysgrok/rs-matter-embassy`'s `icd` branch by git
-revision, and the workspace's `[patch.crates-io]` redirects `rs-matter` to
-`project-chip/rs-matter`'s main branch, `openthread` to `sysgrok/openthread`'s
-`csl` branch, and `esp-hal` and friends to `ivmarkov/esp-hal`'s
-`ieee802154-sleep` branch.
+Nothing here comes from the registry except the chip support crates. The
+workspace's `[patch.crates-io]` redirects four of them:
 
-The Thread driver's ICD support and the CSL work need APIs that only exist past
-the published releases, which is why the pins exist. `.cargo/config.toml` also
-pins `esp-hal` and `esp-rtos` to a specific revision; moving that revision
-usually means adapting the peripheral, ADC, RNG and LEDC calls in `fw/`, which are
-pre-1.0 APIs.
+| Crate | Where it comes from | Why |
+|---|---|---|
+| `rs-matter-embassy` | `sysgrok/rs-matter-embassy`, `master` | the ICD work is merged but unreleased |
+| `rs-matter` | `project-chip/rs-matter`, `main` | the ICD and subscription work is past the published `0.4.1` |
+| `rs-matter-stack` | `sysgrok/rs-matter-stack`, `master` | periodic polling that costs power with Thread, and network diagnostics, are unreleased |
+| `openthread` | `esp-rs/openthread`, `main` | CSL and the radio sleep API, unreleased |
+| `esp-hal` and friends | `ivmarkov/esp-hal`, `ieee802154-sleep` | `Ieee802154::stop_receive` / `EspRadio::set_sleep`, so the SED receiver is off between polls |
 
-Retarget everything to upstream and the registry once the relevant pull requests
-and their dependencies have merged.
+The `esp-hal` one is the last real fork: upstream `openthread`'s ESP radio still
+carries a `TODO: Upstream in esp-radio a stop_receive counterpart to the existing
+start_receive`, so the sleep path depends on it. Everything else is an unreleased
+commit on a project's own repository.
+
+Each is pinned by revision rather than by branch, so an upstream push cannot
+change what this firmware builds. Moving a pin means rebuilding and re-flashing;
+`.cargo/config.toml` also pins `esp-hal` and `esp-rtos` to a specific revision,
+and moving that one usually means adapting the peripheral, ADC, RNG and LEDC
+calls in `fw/`, which are pre-1.0 APIs.
+
+Retarget each to the registry as the releases land.

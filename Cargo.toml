@@ -21,19 +21,18 @@ overflow-checks = false
 opt-level = "s"
 
 [patch.crates-io]
-# The ICD support `rs-matter-embassy`'s `icd` branch builds on (the `Icd` power
-# mode state machine, `LitIcd`/`LitIcdMgmtHandler`) lives on `rs-matter`'s main
-# branch, past the published `0.4.1` release that `rs-matter-stack` still
-# resolves to.
-rs-matter = { git = "https://github.com/project-chip/rs-matter", rev = "4d4fd3a2d821fb0105a340e244b10be44efd3646" }
-# `sysgrok/openthread`'s `csl` branch adds the CSL (Coordinated Sampled
-# Listening) API (`set_csl_period`, `wait_radio_ready`, ...) and the `esp-radio`
-# 1.0.0-beta.1 `Ieee802154` sleep support the SED driver needs.
-openthread = { git = "https://github.com/sysgrok/openthread", rev = "41cfca398bb1d2d26deb6671e635ce262df4bfc9" }
-openthread-sys = { git = "https://github.com/sysgrok/openthread", rev = "41cfca398bb1d2d26deb6671e635ce262df4bfc9" }
-# `ivmarkov/esp-hal`'s `ieee802154-sleep` branch: the `esp-radio` 1.0.0-beta.1
-# that `sysgrok/openthread` needs, plus `Ieee802154::stop_receive` /
-# `EspRadio::set_sleep` so the SED receiver is off between data polls.
+# The ICD work - the `Icd` power mode state machine, the subscription keep-alive
+# reporting, and the power fixes both build on - is past the published releases.
+# `docs/building.md` has the whole pin set and why each one exists.
+rs-matter = { git = "https://github.com/project-chip/rs-matter", rev = "7195e2b1f45df94ee1bc63605b7db91a6878b9dc" }
+rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack", rev = "3319ed580308bdd8ee84b521ccbd1f5855414602" }
+# The CSL API and the radio sleep path the SED driver needs, unreleased.
+openthread = { git = "https://github.com/esp-rs/openthread", rev = "705c5576ccfd7b417cfa4b23912a13b1b99e01f2" }
+openthread-sys = { git = "https://github.com/esp-rs/openthread", rev = "705c5576ccfd7b417cfa4b23912a13b1b99e01f2" }
+# `Ieee802154::stop_receive` / `EspRadio::set_sleep`, so the SED receiver is off
+# between data polls. Upstream's ESP radio still has a TODO to provide the
+# `stop_receive` counterpart to `start_receive`, so this is the one genuine fork
+# left in the set.
 esp-hal = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
 esp-rtos = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }
 esp-alloc = { git = "https://github.com/ivmarkov/esp-hal", rev = "1926ae8dbe8c0ebd986568ff51b62eb1c7ce12c6" }

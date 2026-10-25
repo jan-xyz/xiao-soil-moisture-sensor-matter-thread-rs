@@ -3242,7 +3242,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 [[package]]
 name = "openthread"
 version = "0.4.0"
-source = "git+https://github.com/sysgrok/openthread?rev=41cfca398bb1d2d26deb6671e635ce262df4bfc9#41cfca398bb1d2d26deb6671e635ce262df4bfc9"
+source = "git+https://github.com/esp-rs/openthread?rev=705c5576ccfd7b417cfa4b23912a13b1b99e01f2#705c5576ccfd7b417cfa4b23912a13b1b99e01f2"
 dependencies = [
  "bitflags 2.13.2",
  "embassy-futures",
@@ -3259,7 +3259,7 @@ dependencies = [
 [[package]]
 name = "openthread-sys"
 version = "0.4.0"
-source = "git+https://github.com/sysgrok/openthread?rev=41cfca398bb1d2d26deb6671e635ce262df4bfc9#41cfca398bb1d2d26deb6671e635ce262df4bfc9"
+source = "git+https://github.com/esp-rs/openthread?rev=705c5576ccfd7b417cfa4b23912a13b1b99e01f2#705c5576ccfd7b417cfa4b23912a13b1b99e01f2"
 dependencies = [
  "anyhow",
  "bindgen 0.72.1",
@@ -3653,7 +3653,7 @@ dependencies = [
 [[package]]
 name = "rs-matter"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=4d4fd3a2d821fb0105a340e244b10be44efd3646#4d4fd3a2d821fb0105a340e244b10be44efd3646"
+source = "git+https://github.com/project-chip/rs-matter?rev=7195e2b1f45df94ee1bc63605b7db91a6878b9dc#7195e2b1f45df94ee1bc63605b7db91a6878b9dc"
 dependencies = [
  "async-io",
  "bitflags 2.13.2",
@@ -3692,7 +3692,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-codegen"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=4d4fd3a2d821fb0105a340e244b10be44efd3646#4d4fd3a2d821fb0105a340e244b10be44efd3646"
+source = "git+https://github.com/project-chip/rs-matter?rev=7195e2b1f45df94ee1bc63605b7db91a6878b9dc#7195e2b1f45df94ee1bc63605b7db91a6878b9dc"
 dependencies = [
  "convert_case 0.6.0",
  "miette",
@@ -3711,7 +3711,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-embassy"
 version = "0.1.0"
-source = "git+https://github.com/sysgrok/rs-matter-embassy?rev=ff223e1046f067712e31aa3e9384c5ff5c9c3f11#ff223e1046f067712e31aa3e9384c5ff5c9c3f11"
+source = "git+https://github.com/sysgrok/rs-matter-embassy?rev=603c709b85dab296482dc8702c8fd99568f98b99#603c709b85dab296482dc8702c8fd99568f98b99"
 dependencies = [
  "bt-hci 0.10.1",
  "cfg-if",
@@ -3746,7 +3746,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-macros"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=4d4fd3a2d821fb0105a340e244b10be44efd3646#4d4fd3a2d821fb0105a340e244b10be44efd3646"
+source = "git+https://github.com/project-chip/rs-matter?rev=7195e2b1f45df94ee1bc63605b7db91a6878b9dc#7195e2b1f45df94ee1bc63605b7db91a6878b9dc"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3757,8 +3757,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-stack"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "051f3ab6cf95969cd347dbe96782a1550982bdf73e8f3b3540b11e9365de9afd"
+source = "git+https://github.com/sysgrok/rs-matter-stack?rev=3319ed580308bdd8ee84b521ccbd1f5855414602#3319ed580308bdd8ee84b521ccbd1f5855414602"
 dependencies = [
  "bitflags 2.13.2",
  "cfg-if",
