@@ -32,8 +32,21 @@ flash-release:
 	CC=/opt/homebrew/opt/llvm/bin/clang CXX=/opt/homebrew/opt/llvm/bin/clang++ \
 	cargo run --release
 
+# A timestamp on every monitored line, in the same format either way. `ts`, from
+# moreutils, is the tool for this when it is installed; `scripts/stamp.py` is the
+# same thing without the extra package, the way `make size` prefers `llvm-size`
+# and falls back to a script.
+#
+# Absolute wall-clock rather than `ts -i`'s interval since the previous line: the
+# monitor drops the connection whenever the device deep-sleeps, so the gap worth
+# seeing happens *between* runs and an interval counter would restart at zero in
+# each one. Only a clock spans that.
+STAMP := $(shell command -v ts >/dev/null 2>&1 && echo "ts '%H:%M:%S'" || echo "python3 scripts/stamp.py")
+
+# The serial output. `espflash` has no timestamp option of its own, and a log
+# that spans deep-sleep cycles needs one.
 monitor:
-	espflash monitor
+	espflash monitor | $(STAMP)
 
 fmt:
 	cargo fmt

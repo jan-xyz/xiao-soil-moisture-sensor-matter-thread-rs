@@ -22,6 +22,36 @@ make fmt              # cargo fmt
 `cargo run` uses the runner in `.cargo/config.toml`, so flashing and monitoring
 happen in one step.
 
+### Timestamps
+
+Every monitored line is prefixed with the wall-clock time it arrived. `espflash`
+has no timestamp option of its own, and a log that spans deep-sleep cycles is
+hard to read without one - the gap between one wake-up and the next is the point
+of watching it.
+
+The timestamp comes from [`ts`](https://joeyh.name/code/moreutils/) when
+`moreutils` is installed (`brew install moreutils`, `apt install moreutils`), and
+from `scripts/stamp.py` when it is not, in the same format either way. Both
+monitoring paths are stamped: `make monitor` pipes `espflash` through it, and
+`cargo run` does it through the runner wrapper `scripts/flash-and-monitor.sh`.
+
+It is wall-clock rather than uptime or `ts -i`'s interval between lines, because
+the monitor drops the connection every time the device sleeps and the device
+reboots on every wake-up. Both the gap and the counter therefore land *between*
+monitor runs, where only a clock that keeps going still means anything.
+
+Note that the monitor exiting is not the device failing. Deep sleep powers down
+the USB-Serial/JTAG peripheral, so the chip disappears from the host and
+`espflash` reports a broken pipe. To follow the device across several sleep
+cycles, loop it:
+
+```sh
+while true
+    make monitor
+    sleep 1
+end
+```
+
 `espflash.toml` points at the custom `partitions.csv`: Matter's key-value store in
 `nvs`, the calibration in `calib`, and a single non-OTA application partition
 taking the rest of the flash.

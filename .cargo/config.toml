@@ -2,7 +2,9 @@
 target = "riscv32imac-unknown-none-elf"
 
 [target.'cfg(all(target_arch = "riscv32", target_os = "none"))']
-runner = "espflash flash --monitor"
+# Wraps `espflash flash --monitor` to add a timestamp to every line;
+# see `scripts/flash-and-monitor.sh`.
+runner = "scripts/flash-and-monitor.sh"
 rustflags = [
   "-C", "link-arg=-Tlinkall.x",
   "-C", "force-frame-pointers",
