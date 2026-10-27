@@ -23,7 +23,7 @@ embassy-embedded-hal = "0.6"
 embassy-futures = "0.1"
 embassy-time = "0.5"
 embassy-sync = "0.8"
-esp-backtrace = { version = "0.20", features = ["panic-handler", "println"] }
+esp-backtrace = { version = "0.20", features = ["panic-handler", "println", "custom-halt"] }
 esp-hal = { version = "~1.2", features = ["log-04", "unstable", "exception-handler"] }
 esp-rtos = { version = "0.4", features = ["esp-radio", "embassy"] }
 esp-alloc = "0.11"
@@ -37,7 +37,7 @@ esp-metadata-generated = "0.5"
 # merged but not released. The Thread SED driver there follows the ICD power mode
 # state machine that `rs-matter` itself owns (`EmbassyThread::with_icd`) instead
 # of an app-driven poll-period handle.
-rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev = "603c709b85dab296482dc8702c8fd99568f98b99", default-features = false, features = [
+rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev = "07f28e64ec0b7aed0b5deb436399e2dd7c6c1bad", default-features = false, features = [
   "esp",
   "log",
 ] }
