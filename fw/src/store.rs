@@ -154,3 +154,47 @@ pub fn init_trend() {
 pub fn trend() -> &'static mut Retained {
     &mut persistent().history
 }
+
+// --- Retained: the panic flag ------------------------------------------------
+
+/// Identifies a panic flag this firmware wrote.
+const PANIC_MAGIC: u32 = 0x5041_4e49; // "PANI"
+
+/// The panic flag, plus the marker that says whether the RTC RAM holding it
+/// actually contains one. Lives apart from [`PersistentTrend`] so the trend's
+/// layout and magic stay about the trend.
+#[repr(C)]
+struct PersistentPanic {
+    magic: u32,
+    panicked: u32,
+}
+
+// SAFETY: plain data with no invariants beyond `magic`.
+unsafe impl esp_hal::Persistable for PersistentPanic {}
+
+/// See [`PersistentTrend`] for why this is RTC RAM and never initialised.
+#[ram(unstable(rtc_fast, persistent))]
+static mut PANIC: PersistentPanic = PersistentPanic {
+    magic: 0,
+    panicked: 0,
+};
+
+/// Marks the current boot as the one that panicked. Called from the panic
+/// handler, so this must not allocate, lock, log or panic: two volatile stores
+/// into RTC RAM, magic last because it is the commit marker.
+pub fn set_panic_flag() {
+    let flag = unsafe { &mut *core::ptr::addr_of_mut!(PANIC) };
+    unsafe {
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(flag.panicked), 1);
+        core::ptr::write_volatile(core::ptr::addr_of_mut!(flag.magic), PANIC_MAGIC);
+    }
+}
+
+/// Whether the previous boot panicked, consuming the flag. An RTC RAM image
+/// without the magic is a cold boot, not a panic.
+pub fn take_panic_flag() -> bool {
+    let flag = unsafe { &mut *core::ptr::addr_of_mut!(PANIC) };
+    let panicked = flag.magic == PANIC_MAGIC && flag.panicked != 0;
+    flag.panicked = 0;
+    panicked
+}

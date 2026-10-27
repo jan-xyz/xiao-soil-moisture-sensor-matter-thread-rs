@@ -33,7 +33,7 @@ use esp_hal::ledc::timer::{self, TimerIFace};
 use esp_hal::ledc::{LSGlobalClkSource, Ledc, LowSpeed};
 use esp_hal::ram;
 use esp_hal::rtc_cntl::sleep::{LowPower, RtcSleepConfig};
-use esp_hal::rtc_cntl::{wakeup_cause, Rtc, WakeupSource};
+use esp_hal::rtc_cntl::{wakeup_cause, Rtc, SocResetReason, WakeupSource};
 use esp_hal::timer::timg::TimerGroup;
 use esp_metadata_generated::memory_range;
 use esp_storage::FlashStorage;
@@ -42,6 +42,7 @@ use log::{info, warn};
 
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
 use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
+use rs_matter_embassy::matter::dm::clusters::gen_diag::BootReasonEnum;
 use rs_matter_embassy::matter::dm::clusters::decl::soil_measurement::ClusterHandler as _;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
 use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{
@@ -121,11 +122,64 @@ const SOIL_ENDPOINT_ID: u16 = 1;
 /// machine feeds them to the driver, which maps them onto the OpenThread
 /// data-poll period. `SII` is the long-idle interval; the stack caps it to the
 /// short-idle poll (and advertises that) while the device operates as one.
-const BASIC_INFO: BasicInfoConfig = BasicInfoConfig {
-    sai: Some(tuning::ACTIVE_POLL_PERIOD_MS),
-    sii: Some(tuning::LIT_POLL_PERIOD_MS),
-    ..TEST_DEV_DET
-};
+///
+/// The serial number is the chip's factory-burned base MAC, so it is unique
+/// per unit without any provisioning. The config must live in static memory
+/// because the Matter stack borrows it for as long as the stack itself lives,
+/// which is why [`serial_no_from_efuse`] parks its buffer through `mk_static!`.
+fn basic_info(serial_no: &'static str) -> BasicInfoConfig<'static> {
+    BasicInfoConfig {
+        sai: Some(tuning::ACTIVE_POLL_PERIOD_MS),
+        sii: Some(tuning::LIT_POLL_PERIOD_MS),
+        vendor_name: "Jan XYZ",
+        product_name: "Soil Moisture Sensor",
+        serial_no,
+        ..TEST_DEV_DET
+    }
+}
+
+/// The eFuse base MAC as 12 uppercase hex digits - within the 32-character
+/// limit the Basic Information cluster puts on the serial number attribute.
+fn serial_no_from_efuse() -> &'static str {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+
+    let mac = esp_hal::efuse::base_mac_address();
+    let mac = mac.as_bytes();
+    let buf: &'static mut [u8; 12] = mk_static!([u8; 12]).init_with([0u8; 12]);
+    for (i, byte) in mac.iter().enumerate() {
+        buf[i * 2] = HEX[(byte >> 4) as usize];
+        buf[i * 2 + 1] = HEX[(byte & 0x0f) as usize];
+    }
+    core::str::from_utf8(buf).unwrap()
+}
+
+/// The Matter answer to "why did this boot happen", from the chip's reset
+/// reason. The C6's ROM reports a brown-out with the same code as a power-on,
+/// so a sagging cell looks like a power cycle here; the distinction the spec
+/// draws between hardware and software watchdogs is kept.
+fn boot_reason(reset: Option<SocResetReason>) -> BootReasonEnum {
+    use SocResetReason::{ChipPowerOn, CoreDeepSleep, CoreRtcWdt, CoreSw, Cpu0Sw, SysRtcWdt};
+
+    match reset {
+        Some(CoreDeepSleep) => BootReasonEnum::Unspecified,
+        Some(ChipPowerOn) => BootReasonEnum::PowerOnReboot,
+        Some(CoreSw | Cpu0Sw) => BootReasonEnum::SoftwareReset,
+        Some(CoreRtcWdt | SysRtcWdt) => BootReasonEnum::HardwareWatchdogReset,
+        Some(_) => BootReasonEnum::SoftwareWatchdogReset,
+        None => BootReasonEnum::Unspecified,
+    }
+}
+
+/// esp-backtrace's `custom-halt` hook: the panic message and backtrace have
+/// been printed by the time this runs. Recording the panic and resetting is
+/// what makes a crash observable - a hang here would drain the cell, report
+/// nothing to the controller, and leave the next boot unable to tell a crash
+/// from a power cycle.
+#[no_mangle]
+extern "Rust" fn custom_halt() -> ! {
+    store::set_panic_flag();
+    esp_hal::system::software_reset()
+}
 
 /// The ICD Management cluster metadata, exactly as served by
 /// [`LitIcdMgmtHandler`].
@@ -181,9 +235,12 @@ async fn main(_s: Spawner) {
 
     // A long-idle device spends most of its life asleep, and a wake-up is a
     // reboot - so "why did this boot happen" is the first thing worth knowing.
+    // The fine reset taxonomy is a reporting concern (BootReason below); the
+    // decision layer only needs sleep wake versus reboot.
+    let reset = esp_hal::system::reset_reason();
     let wake_cause = wakeup_cause();
     let wake = if wake_cause.is_empty() {
-        info!("Cold boot");
+        info!("Cold boot: {reset:?}");
         WakeCause::Cold
     } else if wake_cause.contains(WakeupSource::Gpio) {
         info!("Woken up by the button");
@@ -192,6 +249,10 @@ async fn main(_s: Spawner) {
         info!("Woken up from deep sleep by the timer");
         WakeCause::Timer
     };
+
+    if store::take_panic_flag() {
+        warn!("The previous boot panicked");
+    }
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
@@ -319,7 +380,7 @@ async fn main(_s: Spawner) {
     // variation, and it avoids blowing the program stack.
     let stack = mk_static!(EmbassyThreadMatterStack::<BUMP_SIZE, ()>).init_with(
         EmbassyThreadMatterStack::init(
-            &BASIC_INFO,
+            mk_static!(BasicInfoConfig).init_with(basic_info(serial_no_from_efuse())),
             BasicCommData {
                 password: TEST_DEV_COMM.password,
                 discriminator,
@@ -327,6 +388,10 @@ async fn main(_s: Spawner) {
             &TEST_DEV_ATT,
         ),
     );
+
+    // Before the stack's event loop runs: the BootReason event is emitted once
+    // at its start, and reads what is set here.
+    stack.matter().set_boot_reason(boot_reason(reset));
 
     let soil_handler = SoilMeasurementHandler::new(
         SOIL_ENDPOINT_ID,
