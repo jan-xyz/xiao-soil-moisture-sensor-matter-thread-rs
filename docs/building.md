@@ -14,6 +14,7 @@ make build-release    # firmware, release
 make flash            # build + flash + monitor
 make flash-release    # the same, optimised
 make monitor          # attach to an already-flashed board
+make watch            # keep re-attaching: the monitor dies at every deep sleep
 make size             # how big the image is, against its partition
 make check            # cargo check
 make fmt              # cargo fmt
@@ -120,7 +121,7 @@ workspace's `[patch.crates-io]` redirects four of them:
 |---|---|---|
 | `rs-matter-embassy` | `sysgrok/rs-matter-embassy`, `master` | the ICD work is merged but unreleased |
 | `rs-matter` | `project-chip/rs-matter`, `main` | the ICD and subscription work is past the published `0.4.1` |
-| `rs-matter-stack` | `sysgrok/rs-matter-stack`, `master` | periodic polling that costs power with Thread, and network diagnostics, are unreleased |
+| `rs-matter-stack` | `sysgrok/rs-matter-stack`, PR #53 branch | periodic polling that costs power with Thread, and network diagnostics, are unreleased; the PR makes `startup` take the stack by shared borrow |
 | `openthread` | `esp-rs/openthread`, `main` | CSL and the radio sleep API, unreleased |
 | `esp-hal` and friends | `ivmarkov/esp-hal`, `ieee802154-sleep` | `Ieee802154::stop_receive` / `EspRadio::set_sleep`, so the SED receiver is off between polls |
 

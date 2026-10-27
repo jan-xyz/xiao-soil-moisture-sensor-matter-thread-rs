@@ -13,8 +13,8 @@ use std::collections::VecDeque;
 
 use soil_sensor_core::led::LedCommand;
 use soil_sensor_core::ports::{
-    ButtonEdge, Calibration, Event, IcdState, OperatingMode, Outcome, Ports, PowerMode, Retained,
-    WakeCause,
+    ButtonEdge, Calibration, Event, IcdState, MatterPorts, OperatingMode, Outcome, Ports,
+    PowerMode, Retained, WakeCause,
 };
 use soil_sensor_core::time::{Instant as CoreInstant, Millis};
 use soil_sensor_core::tuning;
@@ -237,8 +237,11 @@ impl World {
     /// Run one boot, from the current virtual time to whatever ends it.
     pub fn run_boot(&mut self, wake: WakeCause) -> Outcome {
         self.boot_at = self.clock;
-        // A boot starts active, exactly as a real stack does.
-        self.icd.active_until = self.clock + tuning::ACTIVE_HOLD.as_millis();
+        // A boot starts active, and stays active for as long as the wake phase
+        // lasts: the modelled stack has not spoken yet, so there is no active
+        // window to end. The window opens where the real stack starts - after
+        // the wake phase, in `drive`.
+        self.icd.active_until = u64::MAX;
         self.icd_active = true;
         self.icd_changed = false;
         self.operating_mode_lit = self.clock >= self.icd.lit_at;
@@ -288,6 +291,36 @@ impl World {
         let soil_handler = SoilMeasurementHandler::new(1, Dataver::new(0), cell);
         let power_handler = PowerSourceHandler::new(1, Dataver::new(0), battery_cell);
 
+        // The wake phase: the waking press and the boot's one reading, before
+        // any protocol stack exists.
+        let app = {
+            let mut ports = SimPorts {
+                world: self,
+                soil_handler: &soil_handler,
+                power_handler: &power_handler,
+                soil_dataver: 0,
+                battery_dataver: 0,
+            };
+
+            match embassy_futures::block_on(soil_sensor_core::app::run_wake(
+                &mut ports,
+                soil_sensor_core::app::Boot {
+                    wake,
+                    now: CoreInstant::ZERO,
+                },
+            )) {
+                Ok(app) => app,
+                // The only outcome a wake phase can end a boot with, and the
+                // one case where the modelled stack never starts at all.
+                Err(outcome) => return outcome,
+            }
+        };
+
+        // The protocol stack starts here, after the wake phase - so the
+        // modelled ICD's active window opens now, sized as the stack's own.
+        self.icd.active_until = self.clock + tuning::ACTIVE_HOLD.as_millis();
+        self.sync_icd();
+
         let mut ports = SimPorts {
             world: self,
             soil_handler: &soil_handler,
@@ -296,13 +329,7 @@ impl World {
             battery_dataver: 0,
         };
 
-        embassy_futures::block_on(soil_sensor_core::app::run_boot(
-            &mut ports,
-            soil_sensor_core::app::Boot {
-                wake,
-                now: CoreInstant::ZERO,
-            },
-        ))
+        embassy_futures::block_on(soil_sensor_core::app::run_boot(&mut ports, app))
     }
 
     // --- Observations --------------------------------------------------------
@@ -608,6 +635,9 @@ impl Ports for SimPorts<'_> {
         &mut self.world.retained
     }
 
+}
+
+impl MatterPorts for SimPorts<'_> {
     fn persist_reboot_count(&mut self) {
         self.world.reboot_count_writes += 1;
     }

@@ -26,7 +26,7 @@ use crate::calibration::{self, CalibrationOutcome};
 use crate::led::LedCommand;
 use crate::math::{battery_percent, soil_moisture_percent};
 use crate::ports::{
-    Event, IcdState, OperatingMode, Outcome, Ports, PowerMode, Retained, WakeCause,
+    Event, IcdState, MatterPorts, OperatingMode, Outcome, Ports, PowerMode, Retained, WakeCause,
 };
 use crate::time::Instant;
 use crate::tuning;
@@ -91,47 +91,23 @@ impl App {
     /// Do whatever is due now, and end the boot if it is over.
     ///
     /// Returns `None` when there is nothing left to do but wait.
-    pub async fn step<P: Ports>(&mut self, ports: &mut P) -> Option<Outcome> {
-        // Everything that is due, before anything that is waited for. Doing one
-        // thing and returning would be wrong here: taking a reading advances the
-        // clock, and that advance can carry the device past the moment its
-        // protocol stack went idle. Re-checking immediately is what stops a boot
-        // from sampling forever instead of noticing it may sleep.
-        loop {
-            let now = ports.now();
+    ///
+    /// This is the operational phase's step, and it speaks through the
+    /// protocol stack - the reboot count's two write sites both live here,
+    /// which is why it takes [`MatterPorts`]. The wake phase has its own,
+    /// smaller step in [`Self::step_wake`].
+    pub async fn step<P: MatterPorts>(&mut self, ports: &mut P) -> Option<Outcome> {
+        self.step_wake(ports).await;
 
-            // 1. A calibration owns the boot until it finishes. The protocol
-            //    stack is kept active across it by the gesture that started it.
-            if self.calibration_requested {
-                self.calibration_requested = false;
-                if let CalibrationOutcome::Accepted(calibration) = calibration::run(ports).await {
-                    self.calibration = calibration;
-                }
-                continue;
-            }
-
-            // 2. One reading per due sample. This is the whole reason a boot
-            //    exists in the long-idle profile, so it must happen before
-            //    anything can end the boot.
-            if now >= self.next_sample {
-                let with_led = core::mem::take(&mut self.sample_with_led);
-                self.sample(ports, with_led).await;
-                self.next_sample = ports.now().saturating_add(tuning::SAMPLE_PERIOD);
-                continue;
-            }
-
-            // 3. The reboot count, once per counted boot - every boot except a
-            //    wake from sleep, per the spec's RebootCount clause - and never
-            //    before that boot has proved it is not a boot loop.
-            if !self.reboot_count_persisted && now >= self.reboot_count_due {
-                self.persist_reboot_count(ports);
-                continue;
-            }
-
-            break;
+        // The reboot count, once per counted boot - every boot except a wake
+        // from sleep, per the spec's RebootCount clause - and never before
+        // that boot has proved it is not a boot loop.
+        if !self.reboot_count_persisted && ports.now() >= self.reboot_count_due {
+            self.persist_reboot_count(ports);
+            return None;
         }
 
-        // 4. Anything else the world is asking for?
+        // Anything else the world is asking for?
         let now = ports.now();
         let icd = ports.icd();
         self.track_idle(icd, now);
@@ -157,6 +133,42 @@ impl App {
 
         info!("ICD idle: deep-sleeping for {for_ms} ms");
         Some(Outcome::Sleep { for_ms })
+    }
+
+    /// Everything that is due before the protocol stack exists: the
+    /// calibration a waking gesture asked for, and the boot's one reading.
+    ///
+    /// Doing one thing and returning would be wrong here: taking a reading
+    /// advances the clock, and the operational loop re-checks its sleep
+    /// decision against the advanced clock immediately. The same re-checking
+    /// is what stops a boot from sampling forever instead of noticing it may
+    /// sleep.
+    async fn step_wake<P: Ports>(&mut self, ports: &mut P) {
+        loop {
+            let now = ports.now();
+
+            // A calibration owns the boot until it finishes. The protocol
+            // stack is kept active across it by the gesture that started it.
+            if self.calibration_requested {
+                self.calibration_requested = false;
+                if let CalibrationOutcome::Accepted(calibration) = calibration::run(ports).await {
+                    self.calibration = calibration;
+                }
+                continue;
+            }
+
+            // One reading per due sample. This is the whole reason a boot
+            // exists in the long-idle profile, so it must happen before
+            // anything can end the boot.
+            if now >= self.next_sample {
+                let with_led = core::mem::take(&mut self.sample_with_led);
+                self.sample(ports, with_led).await;
+                self.next_sample = ports.now().saturating_add(tuning::SAMPLE_PERIOD);
+                continue;
+            }
+
+            break;
+        }
     }
 
     /// Handle whatever the world delivered, and end the boot if it is over.
@@ -221,6 +233,22 @@ impl App {
         earliest
     }
 
+    /// Whether the press that woke the device is still mid-gesture, and the
+    /// boot's reading has to wait for it.
+    pub(crate) fn waking_press_pending(&self) -> bool {
+        self.button.waking_press_pending()
+    }
+
+    /// The deadline the waking press is waiting for. Only the button's own
+    /// timing is relevant here: every other deadline of the boot sits behind
+    /// the reading that this press is holding off, and none of them may fire
+    /// while the gesture is still undecided.
+    fn wake_deadline(&self) -> Instant {
+        self.button
+            .next_deadline()
+            .expect("a waking press always waits for something")
+    }
+
     /// Take one reading of both sensors and report them.
     async fn sample<P: Ports>(&mut self, ports: &mut P, with_led: bool) {
         let soil_mv = ports.read_soil_mv().await;
@@ -255,7 +283,7 @@ impl App {
         ports.report_battery(percent, battery_mv, time_remaining_s);
     }
 
-    fn persist_reboot_count<P: Ports>(&mut self, ports: &mut P) {
+    fn persist_reboot_count<P: MatterPorts>(&mut self, ports: &mut P) {
         ports.persist_reboot_count();
         self.reboot_count_persisted = true;
     }
@@ -325,10 +353,18 @@ impl App {
     }
 }
 
-/// Drive one boot to its end.
+/// The wake phase of a boot: the press that woke the device resolved, the
+/// boot's one reading taken.
 ///
-/// This is the single code path the firmware and the simulator share.
-pub async fn run_boot<P: Ports>(ports: &mut P, boot: Boot) -> Outcome {
+/// This phase runs before the protocol stack exists, which is the whole point:
+/// the press that wakes the device is answered without waiting for the stack's
+/// seconds of startup. What it needs from the world is [`Ports`] - a port set
+/// of this phase cannot reach the stack at all.
+///
+/// Returns the [`App`] the operational phase continues from, or the outcome
+/// that ends the boot before the stack ever matters - a factory reset,
+/// requested by holding the button through the wake phase.
+pub async fn run_wake<P: Ports>(ports: &mut P, boot: Boot) -> Result<App, Outcome> {
     // A press that woke the device is still in progress, so the boot window has
     // to be wide enough for the gesture it is part of to finish.
     if boot.wake == WakeCause::Button {
@@ -340,6 +376,36 @@ pub async fn run_boot<P: Ports>(ports: &mut P, boot: Boot) -> Outcome {
     let calibration = ports.load_calibration().await;
     let mut app = App::new(boot, calibration);
 
+    // The waking press speaks before the boot measures. A single press wants
+    // the reading shown, a triple click wants the calibration flow, and a
+    // long hold wants the fabric gone - and since the reading is the single
+    // press's answer, nothing is measured until the press has said which of
+    // the three it was. That ordering is also what keeps the boot to its one
+    // reading: the gesture's completion arms the very sample the phase is
+    // about to take, instead of adding a second one.
+    while app.waking_press_pending() {
+        let event = ports.next_event(app.wake_deadline()).await;
+
+        if let Some(outcome) = app.on_event(event, ports) {
+            return Err(outcome);
+        }
+    }
+
+    // The reading, and the calibration the gesture may have asked for. There
+    // is no sleep decision here: the protocol stack has not spoken yet, so
+    // there is nothing to sleep from.
+    app.step_wake(ports).await;
+
+    Ok(app)
+}
+
+/// The operational phase of a boot: everything the protocol stack gates.
+///
+/// Continues from the [`App`] the wake phase returned, and needs
+/// [`MatterPorts`] - the reboot count speaks through the stack's storage. The
+/// protocol stack itself is expected to be starting up or running alongside;
+/// ending the boot in a deep sleep is this phase's job.
+pub async fn run_boot<P: MatterPorts>(ports: &mut P, mut app: App) -> Outcome {
     loop {
         if let Some(outcome) = app.step(ports).await {
             return outcome;
@@ -423,7 +489,6 @@ mod tests {
             static mut TREND: Retained = Retained::new(0, 0);
             unsafe { &mut *core::ptr::addr_of_mut!(TREND) }
         }
-        fn persist_reboot_count(&mut self) {}
     }
 
     fn lit_active() -> IcdState {

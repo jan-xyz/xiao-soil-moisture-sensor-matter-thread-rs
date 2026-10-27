@@ -26,6 +26,7 @@ opt-level = "s"
 # `docs/building.md` has the whole pin set and why each one exists.
 rs-matter = { git = "https://github.com/project-chip/rs-matter", rev = "f5b40c4c5984e94b31ebb960237e03e109dbd37c" }
 rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack", rev = "d97174293227151e3a7a5c9087b89f6f247e9ed9" }
+
 # The CSL API and the radio sleep path the SED driver needs, unreleased.
 openthread = { git = "https://github.com/esp-rs/openthread", rev = "705c5576ccfd7b417cfa4b23912a13b1b99e01f2" }
 openthread-sys = { git = "https://github.com/esp-rs/openthread", rev = "705c5576ccfd7b417cfa4b23912a13b1b99e01f2" }

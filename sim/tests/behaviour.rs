@@ -132,9 +132,8 @@ fn a_power_cycle_takes_the_retained_state_with_it() {
 fn a_single_press_samples_and_says_so_on_the_leds() {
     // A press is what wakes the device in this profile, so the gesture starts
     // at the boot itself rather than at some later moment the boot would never
-    // live to see.
-    // The script moves, so that the second reading is worth reporting: a
-    // repeated reading is suppressed by the deadband, as it should be.
+    // live to see. The waking press's completion IS the boot's reading: one
+    // reading, and the classification of it on the LEDs.
     let mut world = World::new()
         .soil(Script::new([1200, 1000]))
         .battery(Script::constant(1400))
@@ -149,9 +148,31 @@ fn a_single_press_samples_and_says_so_on_the_leds() {
             .any(|(_, cmd)| matches!(cmd, LedCommand::ClassifyMoisture { .. })),
         "a single press is meant to say how wet the soil is"
     );
+    assert_eq!(
+        world.soil_reports().len(),
+        1,
+        "one reading per wake-up: the waking press's, not a second one"
+    );
+}
+
+#[test]
+fn the_boot_does_not_measure_until_the_waking_press_has_spoken() {
+    // The waking press might still turn into a triple click or a hold, so
+    // nothing is measured until it has resolved - which is also what makes
+    // the gesture's sample and the boot's sample the same one.
+    let mut world = World::new()
+        .soil(Script::new([1200, 1000]))
+        .battery(Script::constant(1400))
+        .press(1_000, 100);
+
+    world.run_boot(WakeCause::Button);
+
+    let reports = world.soil_reports();
+    assert_eq!(reports.len(), 1, "one reading per wake-up");
     assert!(
-        world.soil_reports().len() >= 2,
-        "and to take a reading there and then"
+        reports[0].at_ms >= 1_100 + tuning::BUTTON_TRIPLE_CLICK_WINDOW.as_millis(),
+        "the reading waits for the click window to close, taken at {} ms",
+        reports[0].at_ms
     );
 }
 
@@ -160,9 +181,10 @@ fn a_press_keeps_the_boot_awake_while_the_gesture_is_in_progress() {
     // The device would settle into idle at ACTIVE_HOLD and sleep half a second
     // later. This press starts just before that and is still down when the
     // moment arrives.
+    let press_at = tuning::ACTIVE_HOLD.as_millis() - 200;
     let mut world = World::new()
         .soil(Script::new([1200, 1000]))
-        .press(10_200, 2_000);
+        .press(press_at, 2_000);
 
     let outcome = world.run_boot(WakeCause::Timer);
 
@@ -171,7 +193,7 @@ fn a_press_keeps_the_boot_awake_while_the_gesture_is_in_progress() {
         other => panic!("expected a sleep eventually, got {other:?}"),
     };
     assert!(
-        awake > 11_500,
+        awake > tuning::ACTIVE_HOLD.as_millis() + tuning::SLEEP_SETTLE.as_millis() + 1_000,
         "a sleep would restart the gesture's timing, so the boot has to wait for \
          it, but it ended after {awake} ms"
     );
@@ -192,10 +214,11 @@ fn a_ten_second_hold_asks_for_a_factory_reset() {
 
 #[test]
 fn three_presses_start_the_calibration_flow() {
-    // The script is read in order: the boot's own reading first, then the two
-    // the calibration flow takes, so the probe reads dry and then wet.
+    // The waking gesture resolves before anything is measured, so the script
+    // is read in the flow's order: the dry reference, the wet reference, and
+    // then the boot's own reading.
     let mut world = World::new()
-        .soil(Script::new([1200, 1500, 900]))
+        .soil(Script::new([1500, 900, 900]))
         // Three taps inside one click window of each other.
         .press(1_000, 100)
         .press(1_300, 100)
@@ -391,9 +414,11 @@ fn the_device_operates_as_a_short_idle_one_until_a_controller_registers() {
 fn a_calibration_survives_a_reboot() {
     // The probe's own range, captured by the flow during the first boot: dry in
     // air, wet in water. Both sit well above the firmware's built-in dry
-    // reference, which is the point of calibrating at all.
+    // reference, which is the point of calibrating at all. The waking gesture
+    // resolves first, so the flow's two captures open the script, and the
+    // boot's own reading follows them.
     let mut world = World::new()
-        .soil(Script::new([1800, 2500, 1200]))
+        .soil(Script::new([2500, 1200, 1200]))
         .press(1_000, 100)
         .press(1_300, 100)
         .press(1_600, 100);

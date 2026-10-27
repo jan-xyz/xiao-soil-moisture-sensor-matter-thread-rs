@@ -5,6 +5,7 @@
 //! meanwhile. The decision layer says *what* to show; this says how long a pin
 //! is high.
 
+use embassy_executor::task;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_time::{Duration, Timer};
@@ -16,7 +17,7 @@ use soil_sensor_core::time::Millis;
 const LED_QUEUE_DEPTH: usize = 4;
 pub type LedChannel = Channel<CriticalSectionRawMutex, LedCommand, LED_QUEUE_DEPTH>;
 pub type LedSender<'a> = Sender<'a, CriticalSectionRawMutex, LedCommand, LED_QUEUE_DEPTH>;
-type LedReceiver<'a> = Receiver<'a, CriticalSectionRawMutex, LedCommand, LED_QUEUE_DEPTH>;
+pub type LedReceiver<'a> = Receiver<'a, CriticalSectionRawMutex, LedCommand, LED_QUEUE_DEPTH>;
 
 /// One long blink of the colour that classifies a moisture reading.
 const CLASSIFY_BLINK: Millis = Millis::from_millis(1_000);
@@ -58,7 +59,7 @@ impl<'d> StatusLeds<'d> {
 
     /// Runs forever, serializing whatever command arrives next, so two producers
     /// can never fight over the pins.
-    pub async fn run(mut self, commands: LedReceiver<'_>) -> ! {
+    pub async fn run(mut self, commands: LedReceiver<'static>) -> ! {
         loop {
             match commands.receive().await {
                 LedCommand::Blink {
@@ -73,4 +74,13 @@ impl<'d> StatusLeds<'d> {
             }
         }
     }
+}
+
+/// The LEDs task, spawned at the very start of the boot rather than run under
+/// the boot loop's select: a blink outlives the moment that asked for it, and
+/// the wake phase's classification has to render before the protocol stack
+/// even exists.
+#[task]
+pub async fn run(leds: StatusLeds<'static>, commands: LedReceiver<'static>) {
+    leds.run(commands).await
 }

@@ -99,11 +99,14 @@ impl Calibration {
 /// The state that survives a reboot but not the removal of power.
 pub type Retained = DischargeHistory<{ tuning::BATTERY_HISTORY_LEN }>;
 
-/// Everything a boot needs from the world.
+/// Everything a boot's wake phase needs from the world: the waking press
+/// resolved, the boot's one reading taken.
 ///
-/// Implemented twice: once over real peripherals, once over a scripted world.
-/// Nothing else in the tree implements it, and that is the point - the same
-/// [`run_boot`](crate::app::run_boot) drives both.
+/// This is the phase that runs before the protocol stack exists, which is why
+/// there is no way here to speak through it - see [`MatterPorts`] for the line
+/// between the phases. Implemented twice: once over real peripherals, once
+/// over a scripted world. Nothing else in the tree implements it, and that is
+/// the point - the same [`run_wake`](crate::app::run_wake) drives both.
 #[allow(async_fn_in_trait)]
 pub trait Ports {
     /// Milliseconds since this boot began. Use for deadlines within a boot.
@@ -155,6 +158,17 @@ pub trait Ports {
 
     /// The state that outlives a reboot.
     fn retained(&mut self) -> &mut Retained;
+}
 
+/// The part of the ports that exists only once the protocol stack does.
+///
+/// A boot has two phases, and this trait is the line between them. The wake
+/// phase - the waking press and the boot's one reading - runs before the stack
+/// does, and a port set of that phase cannot reach the stack at all. What
+/// crosses it today is one thing: the reboot count, whose storage lives behind
+/// the protocol stack's own persistence.
+#[allow(async_fn_in_trait)]
+pub trait MatterPorts: Ports {
+    /// Persist the reboot count through the protocol stack's storage.
     fn persist_reboot_count(&mut self);
 }

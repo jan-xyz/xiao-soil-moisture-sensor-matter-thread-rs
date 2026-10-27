@@ -6,7 +6,9 @@
 //! module in the decision layer, for where the numbers live.
 //!
 //! The task graph is small on purpose: the protocol stack, the boot loop, and
-//! the two sources that must never miss an event while the boot loop is busy.
+//! the LED task that must not miss a command while the boot loop is busy. The
+//! button runs from the very start of the boot instead, because its press is
+//! what may have woken the device.
 
 #![no_std]
 #![no_main]
@@ -14,12 +16,12 @@
 
 use core::pin::pin;
 
-use embassy_embedded_hal::adapter::{BlockingAsync, YieldingAsync};
 use embassy_executor::Spawner;
-use embassy_futures::join::join;
-use embassy_futures::select::{select3, Either3};
+use embassy_futures::select::{select, Either};
+use core::cell::RefCell;
+
+use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
 use embassy_sync::channel::Channel;
-use embassy_sync::mutex::Mutex;
 
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
@@ -27,7 +29,7 @@ use esp_bootloader_esp_idf::partitions::{
     read_partition_table, DataPartitionSubType, PartitionType, PARTITION_TABLE_MAX_LEN,
 };
 use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcConfig, Attenuation};
-use esp_hal::gpio::{Flex, Level, Output, OutputConfig};
+use esp_hal::gpio::{Flex, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::ledc::channel::{self, ChannelIFace};
 use esp_hal::ledc::timer::{self, TimerIFace};
 use esp_hal::ledc::{LSGlobalClkSource, Ledc, LowSpeed};
@@ -42,9 +44,9 @@ use log::{info, warn};
 
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
 use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
-use rs_matter_embassy::matter::dm::clusters::gen_diag::BootReasonEnum;
 use rs_matter_embassy::matter::dm::clusters::decl::soil_measurement::ClusterHandler as _;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
+use rs_matter_embassy::matter::dm::clusters::gen_diag::BootReasonEnum;
 use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{
     ClusterHandler as _, IcdModeConfig, LitIcd, LitIcdMgmtHandler,
 };
@@ -62,8 +64,8 @@ use rs_matter_embassy::stack::rand::ChaCha12Rng;
 use rs_matter_embassy::wireless::esp::EspThreadDriver;
 use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
 
-use soil_sensor_core::app::{run_boot, Boot};
-use soil_sensor_core::ports::{Outcome, Ports as _, WakeCause};
+use soil_sensor_core::app::{run_boot, run_wake, Boot};
+use soil_sensor_core::ports::{ButtonEdge, Outcome, Ports as _, WakeCause};
 use soil_sensor_core::tuning;
 use soil_sensor_node::{
     BatteryCell, PowerSourceHandler, SoilMeasurementHandler, SoilMoistureCell, DEV_TYPE_SOIL_SENSOR,
@@ -83,7 +85,7 @@ mod probe;
 mod store;
 
 use battery::Battery;
-use flash::{SharedFlash, SharedFlashBus};
+use flash::{FlashCell, SharedFlash, SharedFlashBus};
 use leds::StatusLeds;
 use ports::EspPorts;
 use probe::SoilProbe;
@@ -224,7 +226,7 @@ const NODE: Node = Node {
 };
 
 #[esp_rtos::main]
-async fn main(_s: Spawner) {
+async fn main(s: Spawner) {
     esp_println::logger::init_logger_from_env();
     info!("Starting...");
 
@@ -237,16 +239,21 @@ async fn main(_s: Spawner) {
     // reboot - so "why did this boot happen" is the first thing worth knowing.
     // The fine reset taxonomy is a reporting concern (BootReason below); the
     // decision layer only needs sleep wake versus reboot.
+    //
+    // A low-power pad's wake reports as `Ext1` on this chip, not as `Gpio`:
+    // the pad's wake path is the one `LP_AON` drives, and the wake-cause bits
+    // follow it. Accepting `Gpio` too keeps this true should a future chip
+    // report the same path under the other name.
     let reset = esp_hal::system::reset_reason();
     let wake_cause = wakeup_cause();
     let wake = if wake_cause.is_empty() {
         info!("Cold boot: {reset:?}");
         WakeCause::Cold
-    } else if wake_cause.contains(WakeupSource::Gpio) {
-        info!("Woken up by the button");
+    } else if wake_cause.contains(WakeupSource::Gpio) || wake_cause.contains(WakeupSource::Ext1) {
+        info!("Woken up by the button ({wake_cause:?})");
         WakeCause::Button
     } else {
-        info!("Woken up from deep sleep by the timer");
+        info!("Woken up from deep sleep by the timer ({wake_cause:?})");
         WakeCause::Timer
     };
 
@@ -256,6 +263,34 @@ async fn main(_s: Spawner) {
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
+
+    // The button is armed before anything else, and its task runs from this
+    // moment rather than with the rest of the boot loop: a press is what may
+    // have woken the device, and the Matter stack takes seconds to come up -
+    // a release that lands in there would otherwise never be seen, leaving
+    // the gesture state machine waiting for it. The edge channel is static,
+    // so edges that arrive while the boot is still initializing wait in it.
+    let mut button_input = Flex::new(peripherals.GPIO2);
+    button_input.apply_input_config(&InputConfig::default().with_pull(Pull::Up));
+    button_input.set_output_enable(false);
+    button_input.set_input_enable(true);
+    if wake == WakeCause::Button && button_input.is_high() {
+        // The press that woke the device was over before the pin could be
+        // watched: hand the gesture state machine the release it never saw,
+        // so the tap still counts as a tap - left waiting, the machine reads
+        // the button as held and ends the boot in a factory reset.
+        let _ = EDGE_CHANNEL.sender().try_send(ButtonEdge::Rising);
+    }
+    s.spawn(button::run(button_input, EDGE_CHANNEL.sender()).unwrap());
+
+    // One yield, here on purpose: `main` holds the executor from its first
+    // instruction until its first await, and everything before that point is
+    // seconds of synchronous initialization. Without this yield the button
+    // task would not arm its interrupt until long after a quick tap has
+    // ended - the release would be lost, and the gesture state machine, still
+    // in its mid-press start, would read the tap as a hold and factory-reset
+    // the device ten seconds in.
+    embassy_futures::yield_now().await;
 
     // Antenna/RF-switch setup, driven once at boot and held for the firmware's
     // lifetime.
@@ -330,26 +365,17 @@ async fn main(_s: Spawner) {
     let battery = Battery::new(battery_pin);
 
     let status_leds = StatusLeds::new(
-        Output::new(
-            peripherals.GPIO20.reborrow(),
-            Level::Low,
-            OutputConfig::default(),
-        ),
-        Output::new(
-            peripherals.GPIO18.reborrow(),
-            Level::Low,
-            OutputConfig::default(),
-        ),
-        Output::new(
-            peripherals.GPIO19.reborrow(),
-            Level::Low,
-            OutputConfig::default(),
-        ),
+        Output::new(peripherals.GPIO20, Level::Low, OutputConfig::default()),
+        Output::new(peripherals.GPIO18, Level::Low, OutputConfig::default()),
+        Output::new(peripherals.GPIO19, Level::Low, OutputConfig::default()),
     );
 
-    // The button task finishes the pin setup, including the deep-sleep wake
-    // configuration - see `button.rs`.
-    let button_input = Flex::new(peripherals.GPIO2.reborrow());
+    // The LED task runs from the very start of the boot, alongside the button
+    // task: the wake phase's classification blink has to render before the
+    // protocol stack exists, and a blink outlives the moment that asked for
+    // it, which is why this is a spawned task and not a future under the boot
+    // loop's select.
+    s.spawn(leds::run(status_leds, LED_CHANNEL.receiver()).unwrap());
 
     // The RTC clock keeps counting across deep sleep; it is the time base for
     // anything that has to stay ordered across wake-ups.
@@ -360,9 +386,14 @@ async fn main(_s: Spawner) {
 
     // Flash: one physical peripheral, shared between the protocol stack's own
     // persistence and the calibration store (see `flash.rs`).
-    let mut flash_storage = FlashStorage::new(peripherals.FLASH.reborrow());
+    let mut flash_storage = FlashStorage::new(peripherals.FLASH);
     let mut pt_buf = [0u8; PARTITION_TABLE_MAX_LEN];
     let pt = read_partition_table(&mut flash_storage, &mut pt_buf).unwrap();
+
+    let flash_bus: &'static SharedFlashBus =
+        mk_static!(SharedFlashBus).init_with(BlockingMutex::new(RefCell::new(FlashCell::new(
+            flash_storage,
+        ))));
 
     let nvs = pt
         .find_partition(PartitionType::Data(DataPartitionSubType::Nvs))
@@ -373,8 +404,10 @@ async fn main(_s: Spawner) {
     let calib = pt.iter().find(|p| p.label_as_str() == "calib").unwrap();
     let calibration_range = calib.offset()..(calib.offset() + calib.len());
 
-    let flash_bus: SharedFlashBus =
-        Mutex::new(YieldingAsync::new(BlockingAsync::new(flash_storage)));
+    // The Matter store is shared from here on: the boot loop runs while the
+    // stack is still starting up, and both sides persist through it. See
+    // `store::SharedKvStore` for the discipline that makes that safe.
+    let kv = store::SharedKvStore::share(SeqMapKvBlobStore::new(SharedFlash(flash_bus), nvs_range));
 
     // Allocate the protocol stack statically - mandatory for the wireless stack
     // variation, and it avoids blowing the program stack.
@@ -390,8 +423,8 @@ async fn main(_s: Spawner) {
     );
 
     // Before the stack's event loop runs: the BootReason event is emitted once
-    // at its start, and reads what is set here.
-    stack.matter().set_boot_reason(boot_reason(reset));
+    // at its start, and reads what is set here. That happens inside the matter
+    // future below, where the stack starts up.
 
     let soil_handler = SoilMeasurementHandler::new(
         SOIL_ENDPOINT_ID,
@@ -452,8 +485,53 @@ async fn main(_s: Spawner) {
             Async(desc::DescHandler::new(Dataver::new_rand(&mut weak_rand)).adapt()),
         );
 
-    let mut store = SeqMapKvBlobStore::new(SharedFlash(&flash_bus), nvs_range);
-    stack.startup(&crypto, &mut store).await.unwrap();
+    // The wake phase runs first, and its ports' matter half is `None`: the
+    // waking press and the boot's one reading happen before the protocol
+    // stack exists, and cannot reach it. The stack's own `startup` wants the
+    // stack by `&mut` - its compile-time rule that `run` must not precede or
+    // overlap `startup` - and the phase structure is what makes room for
+    // that: by the time the stack is asked to start, the wake phase is done
+    // and nothing holds the stack.
+    let mut esp_ports = EspPorts {
+        soil: soil_probe,
+        battery,
+        adc,
+        leds: LED_CHANNEL.sender(),
+        edges: EDGE_CHANNEL.receiver(),
+        rtc: &rtc,
+        icd,
+        flash: SharedFlash(flash_bus),
+        calibration_range,
+        soil_handler: &soil_handler,
+        power_handler: &power_handler,
+        matter: None,
+        boot_at: embassy_time::Instant::now(),
+    };
+
+    let boot = Boot {
+        wake,
+        now: esp_ports.now(),
+    };
+
+    let app = match run_wake(&mut esp_ports, boot).await {
+        Ok(app) => app,
+        // A factory reset asked for in the wake phase: the ports hold no
+        // borrow of the stack here, so the reset's `&mut` meets no objection.
+        Err(Outcome::FactoryReset) => {
+            warn!("Factory reset requested - erasing Matter fabric state and rebooting");
+            stack.reset(&crypto, (NODE, &handler), kv).await.unwrap();
+            esp_hal::system::software_reset()
+        }
+        Err(outcome) => {
+            unreachable!("the wake phase cannot end a boot any other way: {outcome:?}")
+        }
+    };
+
+    // The protocol stack starts up here, after the wake phase. Before it
+    // runs, the BootReason event it will emit once is told why this boot
+    // happened.
+    stack.matter().set_boot_reason(boot_reason(reset));
+    stack.startup(&crypto, kv).await.unwrap();
 
     if stack.matter().has_fabrics() {
         info!(
@@ -462,35 +540,25 @@ async fn main(_s: Spawner) {
         );
     }
 
+    // The matter half of the ports attaches between the phases: the
+    // operational phase is the only one that speaks through the stack.
+    esp_ports.attach(stack.matter(), kv);
+
     let outcome = {
-        let kv = stack.matter().kv(&mut store);
+        // The operational phase owns the ports, and drops them: their borrow
+        // of the stack must be gone before the factory reset below takes the
+        // stack by `&mut`.
+        let mut esp_ports = esp_ports;
 
-        let mut esp_ports = EspPorts {
-            soil: soil_probe,
-            battery,
-            adc,
-            leds: LED_CHANNEL.sender(),
-            edges: EDGE_CHANNEL.receiver(),
-            rtc: &rtc,
-            icd,
-            flash: SharedFlash(&flash_bus),
-            calibration_range,
-            soil_handler: &soil_handler,
-            power_handler: &power_handler,
-            matter: stack.matter(),
-            kv: &kv,
-            boot_at: embassy_time::Instant::now(),
-        };
-
-        let boot = Boot {
-            wake,
-            now: esp_ports.now(),
-        };
+        let kv = stack.matter().kv(kv);
 
         let matter = pin!(stack.run_coex(
             EmbassyThread::new(
-                EspThreadDriver::new(peripherals.IEEE802154.reborrow(), peripherals.BT.reborrow())
-                    .with_rx_queue_size(board::THREAD_RX_QUEUE_SIZE),
+                EspThreadDriver::new(
+                    peripherals.IEEE802154.reborrow(),
+                    peripherals.BT.reborrow(),
+                )
+                .with_rx_queue_size(board::THREAD_RX_QUEUE_SIZE),
                 crypto.rand().unwrap(),
                 ieee_eui64,
                 &kv,
@@ -504,25 +572,12 @@ async fn main(_s: Spawner) {
             (),
         ));
 
-        // One boot, from power-up to whatever ends it. The same call, over the
-        // same ports, is what the simulation drives.
-        let boot_loop = pin!(run_boot(&mut esp_ports, boot));
-
-        // The two sources that must not miss an event while the boot loop is
-        // busy: the button (also the wake source) and the LEDs (a blink outlives
-        // the moment that asked for it).
-        let tasks = pin!(join(
-            button::run(button_input, EDGE_CHANNEL.sender()),
-            status_leds.run(LED_CHANNEL.receiver()),
-        ));
-
-        match select3(matter, boot_loop, tasks).await {
-            Either3::First(result) => {
+        match select(matter, run_boot(&mut esp_ports, app)).await {
+            Either::First(result) => {
                 result.unwrap();
                 unreachable!("the protocol stack does not end on its own")
             }
-            Either3::Second(outcome) => outcome,
-            Either3::Third(_) => unreachable!("the device tasks never complete"),
+            Either::Second(outcome) => outcome,
         }
     };
 
@@ -538,6 +593,6 @@ async fn main(_s: Spawner) {
     }
 
     warn!("Factory reset requested - erasing Matter fabric state and rebooting");
-    stack.reset(&crypto, (NODE, &handler), store).await.unwrap();
+    stack.reset(&crypto, (NODE, &handler), kv).await.unwrap();
     esp_hal::system::software_reset()
 }

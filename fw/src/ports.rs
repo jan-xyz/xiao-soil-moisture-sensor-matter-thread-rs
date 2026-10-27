@@ -20,12 +20,12 @@ use esp_hal::peripherals::ADC1;
 use esp_hal::rtc_cntl::Rtc;
 use esp_hal::Async;
 use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{Icd, IcdPowerMode, OperatingModeEnum};
-use rs_matter_embassy::matter::persist::KvBlobStoreAccess;
 use rs_matter_embassy::matter::Matter;
 
 use soil_sensor_core::led::LedCommand;
 use soil_sensor_core::ports::{
-    ButtonEdge, Calibration, Event, IcdState, OperatingMode, Ports, PowerMode, Retained,
+    ButtonEdge, Calibration, Event, IcdState, MatterPorts, OperatingMode, Ports, PowerMode,
+    Retained,
 };
 use soil_sensor_core::time::{Instant as CoreInstant, Millis};
 use soil_sensor_node::{PowerSourceHandler, SoilMeasurementHandler};
@@ -35,13 +35,12 @@ use crate::button::EdgeReceiver;
 use crate::flash::SharedFlash;
 use crate::leds::LedSender;
 use crate::probe::SoilProbe;
-use crate::store;
+use crate::store::{self, SharedKvStore};
 
-pub struct EspPorts<'a, 'd, 'm, SoilPin, BatPin, K>
+pub struct EspPorts<'a, 'd, SoilPin, BatPin>
 where
     SoilPin: AdcChannel,
     BatPin: AdcChannel,
-    K: KvBlobStoreAccess,
 {
     pub soil: SoilProbe<'a, SoilPin>,
     pub battery: Battery<'a, BatPin>,
@@ -54,18 +53,31 @@ where
     pub calibration_range: Range<u32>,
     pub soil_handler: &'a SoilMeasurementHandler<'a>,
     pub power_handler: &'a PowerSourceHandler<'a>,
-    pub matter: &'a Matter<'m>,
-    pub kv: &'a K,
+    /// The matter half of the ports: `None` for exactly as long as the boot's
+    /// wake phase runs - the phase whose port set cannot reach the protocol
+    /// stack - and attached between the phases, where the stack starts.
+    pub(crate) matter: Option<(&'a Matter<'a>, SharedKvStore)>,
     /// When this boot began, on the executor's clock. Everything the decision
     /// layer sees is measured from here.
     pub boot_at: embassy_time::Instant,
 }
 
-impl<SoilPin, BatPin, K> Ports for EspPorts<'_, '_, '_, SoilPin, BatPin, K>
+impl<'a, 'd, SoilPin, BatPin> EspPorts<'a, 'd, SoilPin, BatPin>
 where
     SoilPin: AdcChannel,
     BatPin: AdcChannel,
-    K: KvBlobStoreAccess,
+{
+    /// Attach the matter half, between the boot's phases: the line where the
+    /// protocol stack starts existing.
+    pub fn attach(&mut self, matter: &'a Matter<'a>, kv: SharedKvStore) {
+        self.matter = Some((matter, kv));
+    }
+}
+
+impl<SoilPin, BatPin> Ports for EspPorts<'_, '_, SoilPin, BatPin>
+where
+    SoilPin: AdcChannel,
+    BatPin: AdcChannel,
 {
     fn now(&self) -> CoreInstant {
         CoreInstant::from_millis(
@@ -162,20 +174,35 @@ where
     }
 
     async fn load_calibration(&mut self) -> Calibration {
-        store::load_calibration(self.flash, self.calibration_range.clone()).await
+        store::load_calibration(self.flash, self.calibration_range.clone())
     }
 
     async fn store_calibration(&mut self, calibration: Calibration) -> bool {
-        store::store_calibration(self.flash, self.calibration_range.clone(), calibration).await
+        store::store_calibration(self.flash, self.calibration_range.clone(), calibration)
     }
 
     fn retained(&mut self) -> &mut Retained {
         store::trend()
     }
 
+}
+
+impl<SoilPin, BatPin> MatterPorts for EspPorts<'_, '_, SoilPin, BatPin>
+where
+    SoilPin: AdcChannel,
+    BatPin: AdcChannel,
+{
     fn persist_reboot_count(&mut self) {
-        match self.matter.persist_reboot_count(self.kv) {
-            Ok(()) => log::info!("Reboot count {} persisted", self.matter.reboot_count()),
+        // The store access is built here, per call: a long-lived one would
+        // borrow the stack immutably for the boot's whole length, and the
+        // matter future needs to reach it too. The store itself is shared
+        // behind a mutex, so a call from either side is simply serialised.
+        let (matter, kv) = self
+            .matter
+            .as_ref()
+            .expect("the matter half is attached before the operational phase");
+        match matter.persist_reboot_count(matter.kv(*kv)) {
+            Ok(()) => log::info!("Reboot count {} persisted", matter.reboot_count()),
             Err(e) => log::warn!("Reboot count persist failed: {e:?}"),
         }
     }

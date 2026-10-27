@@ -35,32 +35,66 @@ lets `core`'s tests link against nothing and finish in milliseconds.
 
 ## One boot, from power-up to whatever ends it
 
-A deep sleep is a reboot, so "one boot" is the natural unit of behaviour.
-`core::app::run_boot` drives exactly one and returns how it ended:
+A deep sleep is a reboot, so "one boot" is the natural unit of behaviour. A
+boot has two phases, split where the protocol stack starts existing:
 
 ```rust
-pub async fn run_boot<P: Ports>(ports: &mut P, boot: Boot) -> Outcome
+pub async fn run_wake<P: Ports>(ports: &mut P, boot: Boot) -> Result<App, Outcome>
+pub async fn run_boot<P: MatterPorts>(ports: &mut P, app: App) -> Outcome
 ```
 
-`Outcome` is either `Sleep { for_ms }` or `FactoryReset`. The boot loop does not
-perform either, because both are irreversible; `fw/src/main.rs` does, and `sim`
-performs the first by simply starting another boot.
+`run_wake` is the wake phase: the waking press resolved, the boot's one reading
+taken. Its port set cannot reach the protocol stack, so this phase cannot
+accidentally depend on it - and the composition root (`fw/src/main.rs`, `sim`)
+is free to put the stack's startup exactly where it belongs: between the
+phases. `run_wake` returns the `App` the operational phase continues from - the
+bridge of state across the stack's startup - or the outcome that ends the boot
+before the stack ever matters, which is a factory reset asked for through the
+wake phase. `run_boot` is the operational phase: the loop that ends in
+`Sleep { for_ms }` or `FactoryReset`. Neither phase performs either outcome;
+both are irreversible, so `fw/src/main.rs` does, and `sim` performs the sleep
+by simply starting another boot.
 
-The loop is deliberately dull:
+The wake phase is deliberately dull:
 
+0. on a boot woken by the button, resolve the waking press first: pump the
+   gesture state machine until it says whether the press was a single click,
+   a triple click, or a hold. Nothing is measured until then, which is what
+   makes the gesture's sample and the boot's sample the same one - and the
+   reason a triple click does not cost a reading the user never asked for;
 1. if a gesture asked for a calibration, run it to completion;
-2. if a sample is due, take one and report it;
+2. take the boot's one reading and report it.
+
+There is no sleep decision here: the protocol stack has not spoken yet, so
+there is nothing to sleep from.
+
+The operational loop is deliberately dull:
+
 3. on a boot that is not a wake from sleep, if the reboot count is due, store
-   it;
-4. if the world allows it, end the boot by sleeping;
-5. otherwise wait for the deadline, a button edge, or a protocol change.
+   it - the only thing that speaks through the protocol stack's storage, and
+   the reason the operational phase's ports are a step up (`MatterPorts`) from
+   the wake phase's;
+4. if a sample is due, take one and report it;
+5. if the world allows it, end the boot by sleeping;
+6. otherwise wait for the deadline, a button edge, or a protocol change.
+
+Step 0 exists because the press that wakes the device *is* a user request, and
+the boot answers it before the stack has even started: the stack's startup
+runs after the wake phase, so the reading lands within a couple of seconds of
+the press instead of after the stack's seconds of initialization. The
+controller still learns the reading only once the stack is up - the report
+goes out with the boot's check-in either way. The phase boundary is what makes
+that ordering possible at all: the stack's `startup` takes the stack by `&mut`
+- its compile-time rule that `run` must not precede or overlap `startup` - and
+the wake phase's ports hold no borrow of the stack, so there is room for the
+startup exactly where the phases meet.
 
 Step 1 is a straight line over the ports rather than a state machine, because
 nothing else the device does is urgent next to a person standing there holding a
 probe. It blocks the boot until it finishes, and the gesture that started it keeps
 the protocol stack active for the whole twenty seconds.
 
-Steps 1–3 run in a loop, and that matters: a reading advances the clock, and the
+Steps 3–6 run in a loop, and that matters: a reading advances the clock, and the
 advance can carry the device past the moment its protocol stack went idle.
 Doing one thing and then waiting would leave it sampling every thirty seconds
 forever instead of noticing it may sleep. This was a real bug, found by the
@@ -86,14 +120,25 @@ deadline that has already passed is a wait nothing can end.
 
 ## The task graph
 
-Single executor, one RISC-V core, three futures under one `select3`:
+Single executor, one RISC-V core. Two tasks run from the very start of the
+boot: the button (its press is what may have woken the device) and the status
+LEDs (the wake phase's classification has to render immediately). Then the
+boot's phases run in sequence in `main` - `run_wake`, then the stack's
+`startup`, which takes the stack by `&mut` because `run` must not precede or
+overlap it - and after that, two futures under one `select`:
 
 - the Matter stack (`stack.run_coex(...)`, Thread and BLE-concurrent
   commissioning) — the future that terminates on factory reset;
-- `run_boot`, the boot loop above;
-- a `join` of the two tasks that must not miss an event while the boot loop is
-  busy: the button (edges into a channel, and the deep-sleep wake source) and the
-  status LEDs (a blink outlives the moment that asked for it).
+- `run_boot`, the operational phase above.
+
+A factory reset asked for during the wake phase ends the boot before the stack
+is ever started, and the wake phase's ports hold no borrow of the stack there,
+so the reset's `&mut` meets no objection.
+
+The boot loop and the stack share the flash and the Matter key-value store,
+both behind locks whose discipline is that **every flash operation completes
+inside the poll of the task that started it** — see `fw/src/store.rs` for why
+anything else deadlocks a single-core executor.
 
 It used to be eight futures sharing four channels and two `AtomicBool`s. All of
 that state is now fields of `App`, which is why the boot loop can be tested at

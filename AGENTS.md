@@ -74,6 +74,11 @@ scripts/           the firmware-size helper behind `make size`
 - **The handler chain order is load-bearing.** `EmptyHandler::chain` wraps LIFO:
   the broad "any cluster on endpoint 0" matcher must be chained *first* so that it
   is evaluated last, or it swallows the ICD Management cluster.
+- **Every flash operation completes inside the poll of the task that started
+  it.** The boot loop and the Matter stack share one flash and one Matter
+  store, and a `block_on` that waits for a lock held by an unpolled task can
+  never finish on this single-core executor - it is a deadlock, not a delay.
+  The locks and the discipline are in `fw/src/store.rs`.
 - **The calibration lives in its own partition.** Do not move it into `nvs`: a
   Matter factory reset must not force a recalibration, or the other way round.
 - **`bat_percent_remaining` is in half-percent units** (0-200 for 0-100%). It is

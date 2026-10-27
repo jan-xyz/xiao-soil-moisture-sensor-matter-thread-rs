@@ -53,7 +53,16 @@ The wake itself needs no special arming: `apply_wakeup_config` marks the pad onc
 at startup, and the pin's own interrupt trigger is the wake condition — the
 `wait_for_falling_edge` the button task is already sitting on is what arms the low
 level. A pin that is not listening is not a wake source, which is also why the
-button task exists at all rather than the boot loop polling the pin.
+button task exists at all rather than the boot loop polling the pin - and why it
+is spawned at the very start of the boot, before the Matter stack takes its
+seconds to come up. A release that lands inside that startup would otherwise
+never be seen.
+
+The wake cause needs care too: on this chip the low-power pad's wake is
+reported as `Ext1`, not as `Gpio` - the pad's wake path is the one `LP_AON`
+drives, and the wake-cause bits follow it. Classifying a wake as the button's
+has to accept both names, or every button wake reads as a timer wake and the
+gesture state machine never starts mid-gesture at all.
 
 Because the pin is pulled up, the pull resistor is what holds it at the level that
 does *not* wake the chip. A pad with no pull would float, and a floating pad wakes
@@ -67,16 +76,35 @@ machine therefore starts *mid-gesture* rather than waiting for an edge that will
 never come, and the boot widens its active window so the gesture it is part of —
 a triple click, or the ten-second factory-reset hold — has room to finish.
 
+If the waking press has already ended by the time the pin can be read - a quick
+tap, which is the ordinary case - `main` hands the state machine the release it
+never saw, so the tap still counts as a tap. Without that, a tap looks like a
+press that never ends: no sample, no LED, and a factory reset when the hold
+deadline lapses ten seconds later.
+
 Without both halves, the factory-reset hold can never complete on a device that
 sleeps.
 
-## Flash is one peripheral with two users
+## Flash is one peripheral with two users, and one page of read-ahead
 
 `esp_storage::FlashStorage` owns the `FLASH` peripheral and can only be
 constructed once, but two independent things need it: Matter's own key-value
 store (fabrics, sessions, subscriptions, ICD registrations, the reboot counter)
 and the dry/wet calibration. They borrow one instance through a mutex rather than
 each claiming their own.
+
+Every read also serves from a read-ahead window in RAM (`fw/src/flash.rs`),
+sized past the largest partition the firmware scans. The KV store's lookups
+walk stored items' headers in small sequential reads, and a lookup for a key
+that is not present - of which the fabric table's loader does one per possible
+fabric index at every startup, and fabric indices only ever grow - re-walks
+the same region hundreds of times. An earlier, one-page buffer did nothing
+here: a walk covers six flash pages, so a one-page cache over that working
+set re-read the whole region on every walk. With the whole region buffered,
+the first walk costs one real flash read and every further walk is pure RAM.
+The buffer is invalidated on every write and erase, and it lives under the
+same lock as the flash, so a scanner can never hold a stale window across
+someone else's write.
 
 That wrapper is `YieldingAsync`, not plain `BlockingAsync`, and this matters: a
 sector erase blocks for tens of milliseconds, and on a single-core executor with

@@ -1,4 +1,4 @@
-.PHONY: build build-release flash flash-release monitor fmt lint test sim check size clean
+.PHONY: build build-release flash flash-release monitor watch fmt lint test sim check size clean
 
 HOST := $(shell rustc -vV | sed -n 's/host: //p')
 
@@ -47,6 +47,19 @@ STAMP := $(shell command -v ts >/dev/null 2>&1 && echo "ts '%H:%M:%S'" || echo "
 # that spans deep-sleep cycles needs one.
 monitor:
 	espflash monitor | $(STAMP)
+
+# The monitor exits whenever the device deep-sleeps and takes the USB port with
+# it, so watching a sleepy device means re-attaching over and over - and a
+# freshly attached monitor always misses the boot's first log lines. `watch`
+# loops the monitor instead. The useful moment is a button press: it keeps the
+# device awake for `BUTTON_WAKE_HOLD` (30 s), so press, then run this - the
+# re-attached monitor catches the boot from its second wake-cause line on.
+#
+# A retry while the device sleeps fails to find a port and would spam the
+# terminal with connection attempts, so the loop runs it with stderr silenced;
+# the device's own output arrives on stdout.
+watch:
+	@while true; do espflash monitor 2>/dev/null | $(STAMP); sleep 1; done
 
 fmt:
 	cargo fmt

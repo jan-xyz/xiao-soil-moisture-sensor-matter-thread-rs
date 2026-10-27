@@ -6,17 +6,22 @@
 //!
 //! Two details are load-bearing:
 //!
-//! - the pin is configured for the chip's low-power pad path, because deep sleep
-//!   powers down the GPIO peripheral and a wake source has to survive that. Only
-//!   GPIO0..7 have such a path, which is why the button is not on the module's
-//!   BOOT pin.
+//! - the pin is configured and its task spawned at the very start of the boot
+//!   (see `main`), before the Matter stack takes its seconds to come up, so
+//!   that no edge of the press that woke the device can go unseen. The task
+//!   keeps the pin on the chip's low-power pad path, because deep sleep
+//!   powers down the GPIO peripheral and a wake source has to survive that.
+//!   Only GPIO0..7 have such a path, which is why the button is not on the
+//!   module's BOOT pin.
 //! - a deep-sleep wake is a reboot that the button caused, so the chip comes
-//!   back up with the button already down and no falling edge pending. The first
-//!   thing the loop does is emit an edge for the press that is already happening.
+//!   back up with the button already down and no falling edge pending. The
+//!   first thing the loop does is emit an edge for the press that is already
+//!   happening.
 
+use embassy_executor::task;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
-use esp_hal::gpio::{Flex, InputConfig, Pull, WakeupConfig};
+use esp_hal::gpio::{Flex, WakeupConfig};
 
 use soil_sensor_core::ports::ButtonEdge;
 
@@ -28,15 +33,11 @@ pub type EdgeChannel = Channel<CriticalSectionRawMutex, ButtonEdge, EDGE_QUEUE_D
 pub type EdgeSender<'a> = Sender<'a, CriticalSectionRawMutex, ButtonEdge, EDGE_QUEUE_DEPTH>;
 pub type EdgeReceiver<'a> = Receiver<'a, CriticalSectionRawMutex, ButtonEdge, EDGE_QUEUE_DEPTH>;
 
-/// Runs forever, publishing edges.
-pub async fn run(mut button: Flex<'_>, edges: EdgeSender<'_>) -> ! {
-    // Input with a pull-up: the pin is active low, and the pull is what holds it
-    // at the level that does *not* wake the chip, so a floating pad cannot wake
-    // it immediately and repeatedly.
-    button.apply_input_config(&InputConfig::default().with_pull(Pull::Up));
-    button.set_output_enable(false);
-    button.set_input_enable(true);
-
+/// Runs forever, publishing edges. The pin's input configuration was done by
+/// `main` before this task was spawned, so that the level could be read for
+/// the boot's own bookkeeping.
+#[task]
+pub async fn run(mut button: Flex<'static>, edges: EdgeSender<'static>) -> ! {
     button
         .apply_wakeup_config(&WakeupConfig::default().with_low_power_path(true))
         .unwrap();

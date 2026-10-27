@@ -52,6 +52,10 @@ pub struct ButtonFsm {
     deadline: Instant,
     /// Presses counted in the current gesture.
     clicks: u32,
+    /// Set while the press that woke the device is still waiting to say what
+    /// it wants. A boot orders its reading behind it, so the gesture's single
+    /// click becomes the boot's one reading instead of a second one.
+    waking: bool,
 }
 
 impl ButtonFsm {
@@ -63,6 +67,7 @@ impl ButtonFsm {
             pressed_at: now,
             deadline: now,
             clicks: 0,
+            waking: held_at_boot,
         };
 
         if held_at_boot {
@@ -89,8 +94,10 @@ impl ButtonFsm {
                 None
             }
             // The pin went back up before the debounce elapsed: a contact
-            // glitch, not a gesture.
+            // glitch, not a gesture - and the press that woke the device is
+            // over all the same, so the boot may get on with its reading.
             (State::Debounce, ButtonEdge::Rising) => {
+                self.waking = false;
                 self.state = State::Idle;
                 None
             }
@@ -120,10 +127,12 @@ impl ButtonFsm {
                 None
             }
             State::Held => {
+                self.waking = false;
                 self.state = State::WaitRelease;
                 Some(ButtonEvent::FactoryReset)
             }
             State::Window => {
+                self.waking = false;
                 self.state = State::Idle;
                 match self.clicks {
                     1 => Some(ButtonEvent::SampleNow),
@@ -148,6 +157,13 @@ impl ButtonFsm {
     /// would never complete.
     pub fn is_active(&self) -> bool {
         self.state != State::Idle
+    }
+
+    /// Whether the press that woke the device is still waiting to say what it
+    /// wants. Every state this is true in waits on a deadline, so a boot that
+    /// pumps the machine until this is false always terminates.
+    pub(crate) fn waking_press_pending(&self) -> bool {
+        self.waking && self.next_deadline().is_some()
     }
 
     fn begin_press(&mut self, now: Instant) {

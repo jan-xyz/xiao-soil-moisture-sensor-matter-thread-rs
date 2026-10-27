@@ -118,15 +118,24 @@ pub const LIT_POLL_PERIOD_MS: u32 = 900_000;
 /// The same, in whole seconds, as the protocol's idle-mode duration.
 pub const LIT_IDLE_MODE_DURATION_SECS: u32 = LIT_POLL_PERIOD_MS / 1_000;
 
-/// The fast poll used while active, in milliseconds. Short, because the active
-/// window is short: the device has to catch a peer's reply before it sleeps
-/// again, and the radio time this costs is nothing next to being awake at all.
-pub const ACTIVE_POLL_PERIOD_MS: u32 = 1_000;
+/// The fast poll used while active, in milliseconds, advertised as the session
+/// active interval. Short, because the active window is short: the device has
+/// to catch a peer's reply before it sleeps again, and the radio time this
+/// costs is nothing next to being awake at all. It is also the granularity of
+/// the check-in exchange: every round trip of it waits up to one poll period,
+/// and a slow poll here stretches the boot's awake time directly.
+pub const ACTIVE_POLL_PERIOD_MS: u32 = 300;
 
-/// How long a boot stays active before it is allowed to go idle. This is the
-/// window in which the device must attach, announce itself, take its reading
-/// and be answered - and it is the single largest term in the energy budget.
-pub const ACTIVE_HOLD: Millis = Millis::from_millis(10_000);
+/// How long a boot stays active before it is allowed to go idle. Every
+/// received message extends the window by [`ACTIVE_THRESHOLD_MS`] on its
+/// own, and that threshold sits at the spec's LIT floor of 5 s: the tail
+/// after the last exchange is fixed by the spec either way. The hold itself
+/// is only the controller-latency insurance: the check-in exchange keeps the
+/// window alive, and the observed controller connects within a couple of
+/// seconds of the device becoming reachable - with one observed outlier at
+/// ~14 s, which costs that cycle's subscription and recovers on the next
+/// wake-up's check-in.
+pub const ACTIVE_HOLD: Millis = Millis::from_millis(2_000);
 
 /// How much extra active time every protocol message buys. The protocol's
 /// minimum for a long-idle device, and what keeps the device up while a peer is

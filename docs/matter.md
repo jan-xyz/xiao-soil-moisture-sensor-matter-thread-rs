@@ -78,14 +78,14 @@ device sits awake at ~17 mA.
 
 Every wake-up is a reboot that then has to attach to Thread, re-register with SRP,
 send its Check-In, let the controller re-subscribe and take its own reading — all
-inside `tuning::ACTIVE_HOLD`, which is ten seconds, at ~20–28 mA.
+inside `tuning::ACTIVE_HOLD`, which is six seconds, at ~20–28 mA.
 
 That window is worth far more than the sleep it replaces. At fifteen-minute
 wake-ups it dominates everything else:
 
 | | Time | Current |
 |---|---|---|
-| Active window | 10 s per wake-up | ~17 mA (datasheet: modem-sleep, CPU idle, 160 MHz) |
+| Active window | 6 s per wake-up | ~17 mA (datasheet: modem-sleep, CPU idle, 160 MHz) |
 | Deep sleep | the rest | ~7 µA (datasheet) |
 
 Which works out at roughly 203 µA average and about **1.4 years on a 2500 mAh AA**
