@@ -11,7 +11,8 @@
 //!
 //!   1. if a gesture asked for a calibration, run it to completion;
 //!   2. if a sample is due, take one and report it;
-//!   3. if the reboot count is due, store it;
+//!   3. on a boot that is not a wake from sleep, if the reboot count is due,
+//!      store it;
 //!   4. if the world allows it, end the boot by sleeping;
 //!   5. otherwise wait for the deadline, a button edge, or a protocol change.
 //!
@@ -67,8 +68,17 @@ impl App {
             next_sample: boot.now,
             sample_with_led: false,
             calibration_requested: false,
+            // The reboot count is a best-effort counter of reboots, and the
+            // spec is explicit about the one case it must not count (core
+            // spec §11.12.6.2): "The RebootCount attribute SHALL NOT be
+            // incremented when a Node wakes from a low-power or sleep state."
+            // A deep-sleep wake is this device's ordinary cycle, so warm boots
+            // neither advance nor write the count; powering on, a panic or a
+            // watchdog reset all count. The value a boot serves is one past
+            // the persisted one - the same value the next counted boot will
+            // write - so nothing is lost by not persisting elsewhere.
+            reboot_count_persisted: boot.wake != WakeCause::Cold,
             reboot_count_due: boot.now.saturating_add(tuning::REBOOT_COUNT_HEALTHY_AFTER),
-            reboot_count_persisted: false,
             idle_since: None,
         }
     }
@@ -110,8 +120,9 @@ impl App {
                 continue;
             }
 
-            // 3. The reboot count, once per boot, and never before the boot has
-            //    proved it is not a boot loop.
+            // 3. The reboot count, once per counted boot - every boot except a
+            //    wake from sleep, per the spec's RebootCount clause - and never
+            //    before that boot has proved it is not a boot loop.
             if !self.reboot_count_persisted && now >= self.reboot_count_due {
                 self.persist_reboot_count(ports);
                 continue;
@@ -137,9 +148,12 @@ impl App {
         }
 
         // A boot that got this far is healthy by definition, so this is also
-        // where the reboot count is written in the long-idle profile, where the
-        // deadline above is never reached.
-        self.persist_reboot_count(ports);
+        // where the reboot count is written - on a counted boot. `App::new`
+        // marks wake-from-sleep boots as already done, so a scheduled wake-up
+        // leaves the persisted count untouched.
+        if !self.reboot_count_persisted {
+            self.persist_reboot_count(ports);
+        }
 
         info!("ICD idle: deep-sleeping for {for_ms} ms");
         Some(Outcome::Sleep { for_ms })

@@ -27,6 +27,10 @@ pub enum ButtonEdge {
 
 /// Why this boot happened. A deep sleep is a reboot, so this is the first thing
 /// a boot knows about itself.
+///
+/// Only the distinction the behaviour needs crosses this boundary. The fine
+/// taxonomy of reset causes is a reporting concern, answered by the General
+/// Diagnostics cluster's `BootReason` attribute, and stays in the device layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WakeCause {
     Cold,

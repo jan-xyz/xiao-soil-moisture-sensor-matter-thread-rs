@@ -50,7 +50,8 @@ The loop is deliberately dull:
 
 1. if a gesture asked for a calibration, run it to completion;
 2. if a sample is due, take one and report it;
-3. if the reboot count is due, store it;
+3. on a boot that is not a wake from sleep, if the reboot count is due, store
+   it;
 4. if the world allows it, end the boot by sleeping;
 5. otherwise wait for the deadline, a button edge, or a protocol change.
 

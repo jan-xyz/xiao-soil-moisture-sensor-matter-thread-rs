@@ -95,8 +95,9 @@ pub const BUTTON_WAKE_HOLD: Millis = Millis::from_millis(30_000);
 /// Background sampling period while the device is awake.
 pub const SAMPLE_PERIOD: Millis = Millis::from_secs(30);
 
-/// How long a boot must run before it counts in the persisted reboot count, so
-/// that a boot loop does not spend flash writes.
+/// How long a counted boot - any boot except a wake from sleep, per the spec's
+/// RebootCount clause (core spec §11.12.6.2) - must run before its count is
+/// written back, so that a boot loop does not spend flash writes.
 pub const REBOOT_COUNT_HEALTHY_AFTER: Millis = Millis::from_secs(60);
 
 // --- Reachability -----------------------------------------------------------

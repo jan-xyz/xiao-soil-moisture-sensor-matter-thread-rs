@@ -267,15 +267,55 @@ fn a_calibration_the_probe_cannot_support_is_rejected() {
 }
 
 #[test]
-fn the_reboot_count_is_written_once_per_boot() {
-    let mut world = World::new();
+fn the_reboot_count_counts_reboots_but_not_wakes() {
+    let mut world = World::new()
+        .soil(Script::constant(1200))
+        .battery(Script::constant(1400));
 
+    // The ordinary cycle: every boot is a scheduled wake-up, and the spec's
+    // RebootCount clause (core spec §11.12.6.2) forbids counting a wake from
+    // a low-power or sleep state. None of these count.
     world.run_until(3 * HOUR);
 
     assert_eq!(
+        world.reboot_count_writes(),
+        0,
+        "a wake from sleep is not a reboot worth counting"
+    );
+
+    // Powering on is a reboot, and counts - once per boot, however long the
+    // wake cycle around it runs.
+    world = world.power_cycle();
+    world.run_boot(WakeCause::Cold);
+    world.run_until(world.now_ms() + 3 * HOUR);
+
+    assert_eq!(
         world.reboot_count_writes() as usize,
-        world.boot_count(),
-        "every boot that got far enough to sleep was a healthy one"
+        world
+            .boots()
+            .iter()
+            .filter(|boot| boot.wake == WakeCause::Cold)
+            .count(),
+        "every boot that is not a wake from sleep wrote the count once"
+    );
+}
+
+#[test]
+fn a_warm_boot_never_counts_a_reboot() {
+    // Short-idle for the first ninety seconds, so the boot stays awake well
+    // past the point a cold boot would have been counted - and still does not
+    // count, because staying awake is not a fault either.
+    let mut world = World::new()
+        .soil(Script::new([1200, 1000]))
+        .battery(Script::constant(1400))
+        .lit_at(90_000);
+
+    world.run_boot(WakeCause::Timer);
+
+    assert_eq!(
+        world.reboot_count_writes(),
+        0,
+        "a boot that overstayed the deadline without sleeping is still not a fault"
     );
 }
 
