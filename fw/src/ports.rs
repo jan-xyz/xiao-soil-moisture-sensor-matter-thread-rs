@@ -184,7 +184,6 @@ where
     fn retained(&mut self) -> &mut Retained {
         store::trend()
     }
-
 }
 
 impl<SoilPin, BatPin> MatterPorts for EspPorts<'_, '_, SoilPin, BatPin>

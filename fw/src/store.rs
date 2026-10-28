@@ -24,8 +24,8 @@ use rs_matter_embassy::matter::error::Error;
 use rs_matter_embassy::matter::persist::KvBlobStore;
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::persist::SeqMapKvBlobStore;
-use sequential_storage::cache::NoCache;
-use sequential_storage::map::{fetch_item, store_item};
+use sequential_storage::cache::Cache;
+use sequential_storage::map::{MapConfig, MapStorage};
 
 use soil_sensor_core::math::DischargeHistory;
 use soil_sensor_core::ports::{Calibration, Retained};
@@ -46,33 +46,23 @@ const KEY_WET_MV: u8 = 2;
 ///
 /// The flash operation completes inside the poll of the task that started it:
 /// see [`SharedKvStore`] for why nothing here may await across the flash.
-pub fn load_calibration(mut flash: SharedFlash<'_, '_>, range: Range<u32>) -> Calibration {
+pub fn load_calibration(flash: SharedFlash<'_, '_>, range: Range<u32>) -> Calibration {
     block_on(async {
         let mut buf = [0u8; 32];
-        let mut cache = NoCache::new();
+        let mut storage = MapStorage::new(flash, MapConfig::new(range), Cache::new_uncached());
 
-        let dry_mv = fetch_item::<u8, i32, _>(
-            &mut flash,
-            range.clone(),
-            &mut cache,
-            &mut buf,
-            &KEY_DRY_MV,
-        )
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or(SOIL_CAL_DEFAULT_DRY_MV);
-        let wet_mv = fetch_item::<u8, i32, _>(
-            &mut flash,
-            range,
-            &mut cache,
-            &mut buf,
-            &KEY_WET_MV,
-        )
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or(SOIL_CAL_DEFAULT_WET_MV);
+        let dry_mv = storage
+            .fetch_item::<i32>(&mut buf, &KEY_DRY_MV)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(SOIL_CAL_DEFAULT_DRY_MV);
+        let wet_mv = storage
+            .fetch_item::<i32>(&mut buf, &KEY_WET_MV)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(SOIL_CAL_DEFAULT_WET_MV);
 
         Calibration { dry_mv, wet_mv }
     })
@@ -89,45 +79,31 @@ pub fn store_calibration(
 }
 
 async fn store_calibration_async(
-    mut flash: SharedFlash<'_, '_>,
+    flash: SharedFlash<'_, '_>,
     range: Range<u32>,
     calibration: Calibration,
 ) -> bool {
     let mut buf = [0u8; 32];
-    let mut cache = NoCache::new();
+    let mut storage = MapStorage::new(flash, MapConfig::new(range), Cache::new_uncached());
 
-    if store_item(
-        &mut flash,
-        range.clone(),
-        &mut cache,
-        &mut buf,
-        &KEY_DRY_MV,
-        &calibration.dry_mv,
-    )
-    .await
-    .is_err()
+    if storage
+        .store_item(&mut buf, &KEY_DRY_MV, &calibration.dry_mv)
+        .await
+        .is_err()
     {
         return false;
     }
 
-    store_item(
-        &mut flash,
-        range,
-        &mut cache,
-        &mut buf,
-        &KEY_WET_MV,
-        &calibration.wet_mv,
-    )
-    .await
-    .is_ok()
+    storage
+        .store_item(&mut buf, &KEY_WET_MV, &calibration.wet_mv)
+        .await
+        .is_ok()
 }
 
 // --- Durable: the Matter key-value store -------------------------------------
 
-type KvCell = BlockingMutex<
-    NoopRawMutex,
-    RefCell<SeqMapKvBlobStore<SharedFlash<'static, 'static>>>,
->;
+type KvCell =
+    BlockingMutex<NoopRawMutex, RefCell<SeqMapKvBlobStore<SharedFlash<'static, 'static>>>>;
 
 /// The Matter key-value store, shared between the boot loop and the protocol
 /// stack.
@@ -155,7 +131,9 @@ impl SharedKvStore {
     /// Parks `store` in a static and returns the handle every user shares.
     pub fn share(store: SeqMapKvBlobStore<SharedFlash<'static, 'static>>) -> Self {
         static CELL: static_cell::StaticCell<KvCell> = static_cell::StaticCell::new();
-        let cell: &'static KvCell = CELL.uninit().init_with(BlockingMutex::new(RefCell::new(store)));
+        let cell: &'static KvCell = CELL
+            .uninit()
+            .init_with(BlockingMutex::new(RefCell::new(store)));
         Self { store: cell }
     }
 
@@ -165,9 +143,9 @@ impl SharedKvStore {
         f: impl FnOnce(&mut SeqMapKvBlobStore<SharedFlash<'static, 'static>>) -> R,
     ) -> R {
         self.store.lock(|cell| {
-            let mut store = cell.try_borrow_mut().expect(
-                "the store is never re-entered: every operation completes inside one poll",
-            );
+            let mut store = cell
+                .try_borrow_mut()
+                .expect("the store is never re-entered: every operation completes inside one poll");
             f(&mut store)
         })
     }

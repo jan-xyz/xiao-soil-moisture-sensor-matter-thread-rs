@@ -94,22 +94,25 @@ and the dry/wet calibration. They borrow one instance through a mutex rather tha
 each claiming their own.
 
 Every read also serves from a read-ahead window in RAM (`fw/src/flash.rs`),
-sized past the largest partition the firmware scans. The KV store's lookups
-walk stored items' headers in small sequential reads, and a lookup for a key
-that is not present - of which the fabric table's loader does one per possible
-fabric index at every startup, and fabric indices only ever grow - re-walks
-the same region hundreds of times. An earlier, one-page buffer did nothing
-here: a walk covers six flash pages, so a one-page cache over that working
-set re-read the whole region on every walk. With the whole region buffered,
-the first walk costs one real flash read and every further walk is pure RAM.
-The buffer is invalidated on every write and erase, and it lives under the
-same lock as the flash, so a scanner can never hold a stale window across
-someone else's write.
+sized past the largest partition the firmware scans. Since the KV store tracks
+its keys in RAM (upstream rs-matter-embassy PR 91), a lookup for a key that is
+not present - of which the fabric table's loader does one per possible fabric
+index at every startup, and fabric indices only ever grow - no longer touches
+flash at all. What still walks the flash's stored items' headers in small
+sequential reads is the KV store's single key scan per boot and the calibration
+lookups. With the whole region buffered, the first walk costs one real flash
+read and every further read is pure RAM. An earlier, one-page buffer did
+nothing here: a walk covers six flash pages, so a one-page cache over that
+working set re-read the whole region on every walk. The buffer is invalidated
+on every write and erase, and it lives under the same lock as the flash, so a
+scanner can never hold a stale window across someone else's write.
 
-That wrapper is `YieldingAsync`, not plain `BlockingAsync`, and this matters: a
-sector erase blocks for tens of milliseconds, and on a single-core executor with
-BLE and the Thread radio sharing it, a non-yielding erase would freeze everything
-for the duration.
+The flash path is synchronous down to the driver: every operation completes
+inside the poll of the task that started it, and a sector erase blocks the
+executor for its tens of milliseconds. That is accepted because erases are
+rare - the calibration flow, the KV store's occasional page compaction, and
+factory resets - and because the async alternative would only add per-call
+overhead to the few reads that remain.
 
 The two live in separate partitions — `nvs` and `calib` — so a Matter factory
 reset does not force a recalibration, and recalibrating does not disturb the

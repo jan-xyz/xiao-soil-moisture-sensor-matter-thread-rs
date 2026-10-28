@@ -33,16 +33,18 @@ esp-storage = { version = "0.10", features = ["embedded-storage"] }
 esp-bootloader-esp-idf = { version = "0.6", features = ["log-04"] }
 esp-metadata-generated = "0.5"
 
-# Pinned to `sysgrok/rs-matter-embassy`'s `master`, where the ICD work has been
-# merged but not released. The Thread SED driver there follows the ICD power mode
+# Pinned to `sysgrok/rs-matter-embassy`'s `master`, where the ICD work and the
+# KV cache (PR 91: the KV store tracks its keys in RAM, so the fabric table's
+# 254 missing-index probes per boot cost no flash reads) have been merged but
+# not released. The Thread SED driver there follows the ICD power mode
 # state machine that `rs-matter` itself owns (`EmbassyThread::with_icd`) instead
 # of an app-driven poll-period handle.
-rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev = "07f28e64ec0b7aed0b5deb436399e2dd7c6c1bad", default-features = false, features = [
+rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev = "de748942efc18afbfd49ad350945f2eeea99f8a1", default-features = false, features = [
   "esp",
   "log",
 ] }
 
-sequential-storage = "3"
+sequential-storage = "8"
 embedded-storage-async = "0.4.1"
 
 tinyrlibc = { version = "0.5", default-features = false, features = ["memchr", "utoa", "strtoul"] }

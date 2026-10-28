@@ -7,37 +7,35 @@
 //! the same instance through this mutex instead of each claiming their own.
 //!
 //! The bus is deliberately synchronous. The flash driver underneath is
-//! blocking anyway (`esp_storage` calls the ROM), and the KV store drives it
-//! through `block_on` - so an async wrapper here would add nothing but
-//! per-call machinery, and the per-call cost is the whole story: the fabric
-//! table's loader performs one KV lookup per possible fabric index - 254 of
-//! them per startup, since fabric indices are assigned monotonically and are
-//! never reused - and each lookup walks the partition's stored items in small
-//! sequential reads. At ~70 µs of async overhead per read, those walks cost
-//! four seconds of frozen executor per boot; synchronous, they cost a
-//! quarter of a second.
+//! blocking anyway (`esp_storage` calls the ROM), and every operation
+//! completes inside the poll of the task that started it - the discipline
+//! that keeps the shared-flash users from deadlocking each other (see
+//! `fw/src/store.rs`). An async wrapper would buy the ability to yield
+//! during long operations at the price of per-call machinery, and there is
+//! little left to overlap: since the KV store tracks its keys in RAM
+//! (upstream rs-matter-embassy PR 91), the fabric table's one-lookup-per-
+//! possible-index probes - 254 of them per startup, since fabric indices
+//! are assigned monotonically and are never reused - no longer reach flash
+//! at all, and the reads that remain are a handful per boot.
 //!
-//! What the flash path gives up by being synchronous is the yield during
-//! long operations: an erase blocks the executor for its duration (tens of
-//! ms, up to ~100 for a full sector). That is accepted, because the
-//! alternative - an async flash path - is what cost the four seconds, and
-//! the operations that erase are rare: the calibration flow, the KV store's
-//! occasional page compaction, and factory resets. Every operation still
-//! completes inside the poll of the task that started it, which is the
-//! discipline that keeps the shared-flash users from deadlocking each other
-//! (see `fw/src/store.rs`).
+//! What the synchronous path gives up is the yield during long operations:
+//! an erase blocks the executor for its duration (tens of ms, up to ~100
+//! for a full sector). That is accepted, because the operations that erase
+//! are rare: the calibration flow, the KV store's occasional page
+//! compaction, and factory resets.
 //!
 //! On top sits a read-ahead window, sized past the largest partition the
-//! firmware scans (the NVS spans 24 KiB, `partitions.csv`). The KV lookups
-//! walk stored items' headers in small sequential reads, so the first read
-//! of a walk fills the window once and every further walk over the same
-//! region is pure RAM. A one-page buffer was tried first and taught the
-//! lesson this one encodes: a cache smaller than the working set of a
-//! repeated scan helps nothing. The window is anchored at a window-size
-//! boundary, so a partition that fits inside one window is covered no matter
-//! where in it a scan reads first. It is invalidated on every write and
-//! erase, and it lives under the same lock as the flash, so a scanner can
-//! never hold a stale window across someone else's write.
+//! firmware scans (the NVS spans 24 KiB, `partitions.csv`). The reads that
+//! remain - the KV store's first key scan of a boot, the calibration
+//! lookups - walk stored items' headers in small sequential reads, so the
+//! first read of a walk fills the window once and every further read over
+//! the same region is pure RAM. A one-page buffer was tried first and
+//! taught the lesson this one encodes: a cache smaller than the working
+//! set of a repeated scan helps nothing. The window is anchored at a
+//! window-size boundary, so a partition that fits inside one window is
+//! covered no matter where in it a scan reads first. It is invalidated on
+//! every write and erase, and it lives under the same lock as the flash,
+//! so a scanner can never hold a stale window across someone else's write.
 
 use core::cell::RefCell;
 
@@ -78,9 +76,7 @@ impl ReadAhead {
     /// Whether `[offset, offset + len)` lies inside the buffered window.
     fn covers(&self, offset: u32, len: usize) -> bool {
         match self.window {
-            Some(window) => {
-                offset >= window && (offset - window) as usize + len <= self.buf.len()
-            }
+            Some(window) => offset >= window && (offset - window) as usize + len <= self.buf.len(),
             None => false,
         }
     }
@@ -117,9 +113,9 @@ impl<'d> FlashCell<'d> {
         // at a window-size boundary, so that a partition which fits inside
         // one window is covered no matter where in it a scan happens to read
         // first. The NVS does (0x9000..0xf000 inside 0x8000..0x10000), and
-        // that is what turns the fabric table's 254 lookups into one flash
-        // read: every scan over it, from any page, hits the same buffered
-        // window.
+        // that is what turns the KV store's first key scan of a boot into
+        // one flash read: every read over it, from any page, hits the same
+        // buffered window.
         if bytes.len() as u32 <= READ_AHEAD_WINDOW {
             let window = offset - (offset % READ_AHEAD_WINDOW);
             let len = READ_AHEAD_WINDOW.min(FLASH_CAPACITY - window) as usize;
@@ -170,9 +166,8 @@ impl ReadNorFlash for SharedFlash<'_, '_> {
     const READ_SIZE: usize = FlashStorage::READ_SIZE;
 
     // The bodies below have no await points, on purpose: the operations are
-    // synchronous down to the driver, and every await-less poll boundary
-    // removed is per-call overhead the fabric table's 254 lookups pay 233
-    // reads at a time. See the module docs.
+    // synchronous down to the driver, so the await-less path sheds per-call
+    // overhead for the reads that still happen. See the module docs.
 
     async fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), Self::Error> {
         self.0.lock(|cell| cell.borrow().read(offset, bytes))
@@ -199,4 +194,3 @@ impl NorFlash for SharedFlash<'_, '_> {
 /// `esp_storage::FlashStorage` supports rewriting a page without an
 /// intervening erase, and so does this wrapper.
 impl MultiwriteNorFlash for SharedFlash<'_, '_> {}
-

@@ -315,11 +315,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "211713d2e9fb4793ce4360a712c0764264aff6be48932ccf02ca2a331c0436a9"
 dependencies = [
  "btuuid",
- "embassy-sync 0.7.2",
+ "embassy-sync 0.8.0",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-intrusive",
- "heapless 0.8.0",
+ "heapless 0.9.3",
 ]
 
 [[package]]
@@ -329,11 +329,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f3c66fd0a41a3b3a5906847b1bf5516048ce083e24fa9341a0fa31d3b4cd73d"
 dependencies = [
  "btuuid",
- "embassy-sync 0.7.2",
+ "embassy-sync 0.8.0",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-intrusive",
- "heapless 0.8.0",
+ "heapless 0.9.3",
 ]
 
 [[package]]
@@ -344,11 +344,11 @@ checksum = "f63b3d6f0ef006d9b87a075705d6c142b03681ad34090659647f0e227c1c667f"
 dependencies = [
  "bt-hci-transport",
  "btuuid",
- "embassy-sync 0.7.2",
+ "embassy-sync 0.8.0",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-intrusive",
- "heapless 0.8.0",
+ "heapless 0.9.3",
  "log",
 ]
 
@@ -3653,7 +3653,7 @@ dependencies = [
 [[package]]
 name = "rs-matter"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=f5b40c4c5984e94b31ebb960237e03e109dbd37c#f5b40c4c5984e94b31ebb960237e03e109dbd37c"
+source = "git+https://github.com/project-chip/rs-matter?rev=846073fc78e4bf540203e33c7638dd4751381dca#846073fc78e4bf540203e33c7638dd4751381dca"
 dependencies = [
  "async-io",
  "bitflags 2.13.2",
@@ -3692,7 +3692,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-codegen"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=f5b40c4c5984e94b31ebb960237e03e109dbd37c#f5b40c4c5984e94b31ebb960237e03e109dbd37c"
+source = "git+https://github.com/project-chip/rs-matter?rev=846073fc78e4bf540203e33c7638dd4751381dca#846073fc78e4bf540203e33c7638dd4751381dca"
 dependencies = [
  "convert_case 0.6.0",
  "miette",
@@ -3711,7 +3711,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-embassy"
 version = "0.1.0"
-source = "git+https://github.com/sysgrok/rs-matter-embassy?rev=07f28e64ec0b7aed0b5deb436399e2dd7c6c1bad#07f28e64ec0b7aed0b5deb436399e2dd7c6c1bad"
+source = "git+https://github.com/sysgrok/rs-matter-embassy?rev=de748942efc18afbfd49ad350945f2eeea99f8a1#de748942efc18afbfd49ad350945f2eeea99f8a1"
 dependencies = [
  "bt-hci 0.10.1",
  "cfg-if",
@@ -3746,7 +3746,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-macros"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=f5b40c4c5984e94b31ebb960237e03e109dbd37c#f5b40c4c5984e94b31ebb960237e03e109dbd37c"
+source = "git+https://github.com/project-chip/rs-matter?rev=846073fc78e4bf540203e33c7638dd4751381dca#846073fc78e4bf540203e33c7638dd4751381dca"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3757,7 +3757,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-stack"
 version = "0.3.1"
-source = "git+https://github.com/sysgrok/rs-matter-stack?rev=d97174293227151e3a7a5c9087b89f6f247e9ed9#d97174293227151e3a7a5c9087b89f6f247e9ed9"
+source = "git+https://github.com/sysgrok/rs-matter-stack?rev=8937475a1f808fd17d7cd5c949ee0f0a5e9d3074#8937475a1f808fd17d7cd5c949ee0f0a5e9d3074"
 dependencies = [
  "bitflags 2.13.2",
  "cfg-if",
@@ -3892,9 +3892,9 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "sequential-storage"
-version = "3.0.1"
+version = "8.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b80693b2169b3fe0f9c68d5fae804490cc437113c0526dbabb75c01e758db597"
+checksum = "1550e4d0c7a6a54e2d7884309dc6bfe206d2d8884cb5498177fd936cb233616d"
 dependencies = [
  "embedded-storage-async",
 ]

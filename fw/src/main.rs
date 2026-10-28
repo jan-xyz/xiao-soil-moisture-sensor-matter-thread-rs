@@ -16,9 +16,9 @@
 
 use core::pin::pin;
 
+use core::cell::RefCell;
 use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
-use core::cell::RefCell;
 
 use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
 use embassy_sync::channel::Channel;
@@ -390,10 +390,9 @@ async fn main(s: Spawner) {
     let mut pt_buf = [0u8; PARTITION_TABLE_MAX_LEN];
     let pt = read_partition_table(&mut flash_storage, &mut pt_buf).unwrap();
 
-    let flash_bus: &'static SharedFlashBus =
-        mk_static!(SharedFlashBus).init_with(BlockingMutex::new(RefCell::new(FlashCell::new(
-            flash_storage,
-        ))));
+    let flash_bus: &'static SharedFlashBus = mk_static!(SharedFlashBus).init_with(
+        BlockingMutex::new(RefCell::new(FlashCell::new(flash_storage))),
+    );
 
     let nvs = pt
         .find_partition(PartitionType::Data(DataPartitionSubType::Nvs))
@@ -554,11 +553,8 @@ async fn main(s: Spawner) {
 
         let matter = pin!(stack.run_coex(
             EmbassyThread::new(
-                EspThreadDriver::new(
-                    peripherals.IEEE802154.reborrow(),
-                    peripherals.BT.reborrow(),
-                )
-                .with_rx_queue_size(board::THREAD_RX_QUEUE_SIZE),
+                EspThreadDriver::new(peripherals.IEEE802154.reborrow(), peripherals.BT.reborrow(),)
+                    .with_rx_queue_size(board::THREAD_RX_QUEUE_SIZE),
                 crypto.rand().unwrap(),
                 ieee_eui64,
                 &kv,

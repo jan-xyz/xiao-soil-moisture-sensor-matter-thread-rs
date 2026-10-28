@@ -634,7 +634,6 @@ impl Ports for SimPorts<'_> {
     fn retained(&mut self) -> &mut Retained {
         &mut self.world.retained
     }
-
 }
 
 impl MatterPorts for SimPorts<'_> {

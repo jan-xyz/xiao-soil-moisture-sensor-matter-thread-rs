@@ -15,8 +15,9 @@ HOST_CRATES := -p soil-sensor-core -p soil-sensor-node -p soil-sensor-sim
 # ARGS is passed to the simulator, e.g. `make sim ARGS="--days 7 --verbose"`.
 ARGS ?=
 
-# `cargo run` uses the `runner` in `.cargo/config.toml` (`espflash flash
-# --monitor`), so flashing and monitoring happen in one step.
+# `cargo run` uses the `runner` in `.cargo/config.toml` (`scripts/flash-and-monitor.sh`,
+# which stamps and monitors), so flashing and monitoring happen in one step -
+# already stamped, so these targets must not pipe through `$(STAMP)` again.
 
 build:
 	cargo build
@@ -41,7 +42,7 @@ flash-release:
 # monitor drops the connection whenever the device deep-sleeps, so the gap worth
 # seeing happens *between* runs and an interval counter would restart at zero in
 # each one. Only a clock spans that.
-STAMP := $(shell command -v ts >/dev/null 2>&1 && echo "ts '%H:%M:%S'" || echo "python3 scripts/stamp.py")
+STAMP := $(shell command -v ts >/dev/null 2>&1 && echo "ts '%H:%M:%.S'" || echo "python3 scripts/stamp.py")
 
 # The serial output. `espflash` has no timestamp option of its own, and a log
 # that spans deep-sleep cycles needs one.

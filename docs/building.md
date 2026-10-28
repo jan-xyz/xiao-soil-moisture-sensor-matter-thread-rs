@@ -32,9 +32,12 @@ of watching it.
 
 The timestamp comes from [`ts`](https://joeyh.name/code/moreutils/) when
 `moreutils` is installed (`brew install moreutils`, `apt install moreutils`), and
-from `scripts/stamp.py` when it is not, in the same format either way. Both
-monitoring paths are stamped: `make monitor` pipes `espflash` through it, and
-`cargo run` does it through the runner wrapper `scripts/flash-and-monitor.sh`.
+from `scripts/stamp.py` when it is not, in the same format either way:
+`HH:MM:SS.ffffff`, because the interesting moments - a button press answered, a
+fabric loaded - bunch up inside one second. Both monitoring paths are stamped:
+`make monitor` pipes `espflash` through it, and `cargo run` does it through the
+runner wrapper `scripts/flash-and-monitor.sh` (so the `flash` targets need no
+stamping of their own - piping `cargo run` again would stamp twice).
 
 It is wall-clock rather than uptime or `ts -i`'s interval between lines, because
 the monitor drops the connection every time the device sleeps and the device
@@ -119,9 +122,9 @@ workspace's `[patch.crates-io]` redirects four of them:
 
 | Crate | Where it comes from | Why |
 |---|---|---|
-| `rs-matter-embassy` | `sysgrok/rs-matter-embassy`, `master` | the ICD work is merged but unreleased |
-| `rs-matter` | `project-chip/rs-matter`, `main` | the ICD and subscription work is past the published `0.4.1` |
-| `rs-matter-stack` | `sysgrok/rs-matter-stack`, PR #53 branch | periodic polling that costs power with Thread, and network diagnostics, are unreleased; the PR makes `startup` take the stack by shared borrow |
+| `rs-matter-embassy` | `sysgrok/rs-matter-embassy`, `master` | the ICD work and the KV cache (PR 91) are merged but unreleased |
+| `rs-matter` | `project-chip/rs-matter`, `main` | the ICD and subscription work, and the `Send + Sync` rework the newer rs-matter-embassy needs, are past the published `0.4.1` |
+| `rs-matter-stack` | `sysgrok/rs-matter-stack`, `master` | periodic polling that costs power with Thread, and network diagnostics, are unreleased; the pin tracks the rs-matter `Send + Sync` rework |
 | `openthread` | `esp-rs/openthread`, `main` | CSL and the radio sleep API, unreleased |
 | `esp-hal` and friends | `ivmarkov/esp-hal`, `ieee802154-sleep` | `Ieee802154::stop_receive` / `EspRadio::set_sleep`, so the SED receiver is off between polls |
 

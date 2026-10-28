@@ -1,5 +1,6 @@
 #!/bin/sh
-# The `cargo run` runner: flash, then monitor, with a timestamp on every line.
+# The `cargo run` runner: flash, then monitor, with a wall-clock timestamp
+# (to fractional seconds, matching the Makefile's `20 20 12 61 79 80 81 98 701 33 100 204 250 395 398 399 400STAMP)`) on every line.
 #
 # `espflash` has no timestamp option, so its output goes through `ts` (from
 # moreutils) when that is installed, and through `scripts/stamp.py` when it is
@@ -15,7 +16,7 @@ dir=$(dirname "$0")
 
 if command -v ts >/dev/null 2>&1; then
 	stamper=ts
-	stamper_arg='%H:%M:%S'
+	stamper_arg='%H:%M:%.S'
 else
 	stamper=python3
 	stamper_arg="$dir/stamp.py"
