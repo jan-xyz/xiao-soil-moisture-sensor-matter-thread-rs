@@ -315,11 +315,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "211713d2e9fb4793ce4360a712c0764264aff6be48932ccf02ca2a331c0436a9"
 dependencies = [
  "btuuid",
- "embassy-sync 0.7.2",
+ "embassy-sync 0.8.0",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-intrusive",
- "heapless 0.8.0",
+ "heapless 0.9.3",
 ]
 
 [[package]]
@@ -329,11 +329,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f3c66fd0a41a3b3a5906847b1bf5516048ce083e24fa9341a0fa31d3b4cd73d"
 dependencies = [
  "btuuid",
- "embassy-sync 0.7.2",
+ "embassy-sync 0.8.0",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-intrusive",
- "heapless 0.8.0",
+ "heapless 0.9.3",
 ]
 
 [[package]]
@@ -344,11 +344,11 @@ checksum = "f63b3d6f0ef006d9b87a075705d6c142b03681ad34090659647f0e227c1c667f"
 dependencies = [
  "bt-hci-transport",
  "btuuid",
- "embassy-sync 0.7.2",
+ "embassy-sync 0.8.0",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-intrusive",
- "heapless 0.8.0",
+ "heapless 0.9.3",
  "log",
 ]
 
@@ -3738,7 +3738,7 @@ dependencies = [
  "rand_core 0.9.5",
  "rs-matter-stack",
  "scopeguard",
- "sequential-storage",
+ "sequential-storage 3.0.1",
  "static_cell",
  "trouble-host",
 ]
@@ -3900,6 +3900,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sequential-storage"
+version = "8.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1550e4d0c7a6a54e2d7884309dc6bfe206d2d8884cb5498177fd936cb233616d"
+dependencies = [
+ "embedded-storage-async",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4056,7 +4065,7 @@ dependencies = [
  "log",
  "portable-atomic",
  "rs-matter-embassy",
- "sequential-storage",
+ "sequential-storage 8.0.2",
  "soil-sensor-core",
  "soil-sensor-node",
  "static_cell",

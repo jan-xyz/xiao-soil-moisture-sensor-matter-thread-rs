@@ -42,7 +42,7 @@ rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev 
   "log",
 ] }
 
-sequential-storage = "3"
+sequential-storage = "8"
 embedded-storage-async = "0.4.1"
 
 tinyrlibc = { version = "0.5", default-features = false, features = ["memchr", "utoa", "strtoul"] }
