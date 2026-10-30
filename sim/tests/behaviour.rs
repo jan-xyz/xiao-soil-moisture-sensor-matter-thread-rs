@@ -92,11 +92,25 @@ fn the_battery_estimate_needs_nothing_from_earlier_boots() {
     let first = estimates.first().expect("an estimate per boot");
     let last = estimates.last().expect("an estimate per boot");
     assert_eq!(world.boots()[0].wake, WakeCause::Cold);
+    assert_eq!(first.reading, last.reading);
+    assert!(first.reading.and_then(|r| r.time_remaining_s).is_some());
+}
+
+#[test]
+fn an_empty_holder_reports_the_battery_as_unknown() {
+    let mut world = World::new().battery(Script::constant(375));
+    world.run_boot(WakeCause::Cold);
+
+    let readings: Vec<_> = world
+        .battery_estimates()
+        .iter()
+        .map(|estimate| estimate.reading)
+        .collect();
     assert_eq!(
-        (first.percent, first.time_remaining_s),
-        (last.percent, last.time_remaining_s)
+        readings,
+        vec![None],
+        "a board on USB has no cell to estimate"
     );
-    assert!(first.time_remaining_s.is_some());
 }
 
 #[test]
@@ -109,7 +123,8 @@ fn the_time_remaining_is_more_pessimistic_than_the_energy_model() {
     let estimated_s = world
         .battery_estimates()
         .last()
-        .and_then(|estimate| estimate.time_remaining_s)
+        .and_then(|estimate| estimate.reading)
+        .and_then(|reading| reading.time_remaining_s)
         .expect("every estimate has a time remaining");
 
     assert!(

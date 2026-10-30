@@ -26,7 +26,8 @@ use crate::calibration::{self, CalibrationOutcome};
 use crate::led::LedCommand;
 use crate::math::{battery_permille, battery_time_remaining_s, soil_moisture_percent};
 use crate::ports::{
-    Event, IcdState, MatterPorts, OperatingMode, Outcome, Ports, PowerMode, WakeCause,
+    BatteryReading, Event, IcdState, MatterPorts, OperatingMode, Outcome, Ports, PowerMode,
+    WakeCause,
 };
 use crate::time::Instant;
 use crate::tuning;
@@ -265,19 +266,12 @@ impl App {
             ports.send_led(LedCommand::classify(percent));
         }
 
-        // From this reading alone: nothing about the battery is kept between
-        // boots, so no stored state can ever be wrong.
         let battery_mv = ports.read_battery_mv().await;
-        let permille = battery_permille(battery_mv as i32, &tuning::BATTERY_CURVE);
-        let time_remaining_s = battery_time_remaining_s(
-            permille,
-            tuning::BATTERY_CAPACITY_MAH,
-            tuning::BATTERY_AVERAGE_UA,
-        );
-
-        // Rounded down, so the reported charge is never more than the curve's.
-        let percent = (permille / 10) as u8;
-        ports.report_battery(percent, battery_mv, Some(time_remaining_s));
+        let reading = estimate_battery(battery_mv);
+        if reading.is_none() {
+            info!("Battery: {battery_mv} mV is no cell, so the charge is unknown");
+        }
+        ports.report_battery(reading);
     }
 
     fn persist_reboot_count<P: MatterPorts>(&mut self, ports: &mut P) {
@@ -348,6 +342,28 @@ impl App {
             }
         }
     }
+}
+
+/// The estimate from one reading. Nothing about the battery is kept between
+/// boots, so no stored state can ever be wrong.
+fn estimate_battery(rest_mv: u32) -> Option<BatteryReading> {
+    if rest_mv < tuning::BATTERY_PRESENT_MIN_MV {
+        return None;
+    }
+
+    let permille = battery_permille(rest_mv as i32, &tuning::BATTERY_CURVE);
+    let time_remaining_s = battery_time_remaining_s(
+        permille,
+        tuning::BATTERY_CAPACITY_MAH,
+        tuning::BATTERY_AVERAGE_UA,
+    );
+
+    // Rounded down, so the reported charge is never more than the curve's.
+    Some(BatteryReading {
+        percent: (permille / 10) as u8,
+        rest_mv,
+        time_remaining_s: Some(time_remaining_s),
+    })
 }
 
 /// The wake phase of a boot: the press that woke the device resolved, the
@@ -478,7 +494,7 @@ mod tests {
         }
         fn request_active(&mut self, _hold: Option<Millis>) {}
         fn report_soil(&mut self, _percent: u8) {}
-        fn report_battery(&mut self, _percent: u8, _mv: u32, _remaining: Option<u32>) {}
+        fn report_battery(&mut self, _reading: Option<BatteryReading>) {}
         async fn load_calibration(&mut self) -> Calibration {
             Calibration::DEFAULT
         }
@@ -625,5 +641,46 @@ mod tests {
             Some(tuning::SLEEP_MIN.as_millis()),
             "the reboot a wake-up costs is worth more than a very short sleep"
         );
+    }
+
+    struct EstimateTestCase {
+        name: &'static str,
+        input_mv: u32,
+        expected: Option<BatteryReading>,
+    }
+
+    #[test]
+    fn test_estimate_battery() {
+        let test_cases = vec![
+            EstimateTestCase {
+                name: "an empty holder on USB is no cell",
+                input_mv: 375,
+                expected: None,
+            },
+            EstimateTestCase {
+                name: "just below the threshold is no cell",
+                input_mv: tuning::BATTERY_PRESENT_MIN_MV - 1,
+                expected: None,
+            },
+            EstimateTestCase {
+                name: "at the threshold is a cell, and an empty one",
+                input_mv: tuning::BATTERY_PRESENT_MIN_MV,
+                expected: Some(BatteryReading {
+                    percent: 0,
+                    rest_mv: tuning::BATTERY_PRESENT_MIN_MV,
+                    time_remaining_s: Some(0),
+                }),
+            },
+        ];
+
+        for EstimateTestCase {
+            name,
+            input_mv,
+            expected,
+        } in test_cases
+        {
+            let result = estimate_battery(input_mv);
+            assert_eq!(result, expected, "Failed case: '{name}'");
+        }
     }
 }

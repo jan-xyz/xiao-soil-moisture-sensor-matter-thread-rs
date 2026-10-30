@@ -17,6 +17,14 @@ use crate::led::LedCommand;
 use crate::time::{Instant, Millis};
 use crate::tuning;
 
+/// One battery estimate, from one reading of the cell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BatteryReading {
+    pub percent: u8,
+    pub rest_mv: u32,
+    pub time_remaining_s: Option<u32>,
+}
+
 /// Which way the button just moved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonEdge {
@@ -137,7 +145,9 @@ pub trait Ports {
 
     fn report_soil(&mut self, percent: u8);
 
-    fn report_battery(&mut self, percent: u8, rest_mv: u32, time_remaining_s: Option<u32>);
+    /// `None` when there is no cell to estimate: the reading is too low to come
+    /// from one.
+    fn report_battery(&mut self, reading: Option<BatteryReading>);
 
     async fn load_calibration(&mut self) -> Calibration;
 

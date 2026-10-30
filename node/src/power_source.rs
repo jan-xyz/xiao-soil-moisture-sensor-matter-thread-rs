@@ -31,6 +31,7 @@ use rs_matter::with;
 
 pub use rs_matter::dm::clusters::decl::power_source::*;
 
+use soil_sensor_core::ports::BatteryReading;
 use soil_sensor_core::tuning::BATTERY_REPORT_DELTA_MV;
 
 pub const CLUSTER: Cluster<'static> = FULL_CLUSTER
@@ -80,12 +81,12 @@ impl BatteryCell {
         })
     }
 
-    fn set(&self, percent: u8, rest_mv: u32, time_remaining_s: Option<u32>) {
+    fn set(&self, reading: Option<BatteryReading>) {
         self.0.lock(|cell| {
             *cell.borrow_mut() = Reading {
-                percent: Some(percent),
-                rest_mv: Some(rest_mv),
-                time_remaining_s,
+                percent: reading.map(|reading| reading.percent),
+                rest_mv: reading.map(|reading| reading.rest_mv),
+                time_remaining_s: reading.and_then(|reading| reading.time_remaining_s),
             }
         });
     }
@@ -119,27 +120,40 @@ impl<'a> PowerSourceHandler<'a> {
     }
 
     /// Called by the sampling loop with a freshly measured resting voltage,
-    /// the derived percent and the estimated time remaining. Only reports
-    /// (stores the reading, bumps the dataver and wakes `run()` to push a
-    /// subscription update) when the voltage moved by at least
-    /// `BATTERY_REPORT_DELTA_MV` since the last report, or when an estimate
-    /// becomes available or unavailable, so ADC jitter does not wake the
-    /// Thread radio but a slow discharge still reaches the controller.
-    pub fn report(&self, percent: u8, rest_mv: u32, time_remaining_s: Option<u32>) {
+    /// the derived percent and the estimated time remaining, or `None` when
+    /// there is no cell. Only reports (stores the reading, bumps the dataver
+    /// and wakes `run()` to push a subscription update) when the voltage moved
+    /// by at least `BATTERY_REPORT_DELTA_MV` since the last report, or when an
+    /// estimate or the cell becomes available or unavailable, so ADC jitter
+    /// does not wake the Thread radio but a slow discharge still reaches the
+    /// controller.
+    pub fn report(&self, reading: Option<BatteryReading>) {
         let reported = self.reading.get();
-        let should_report = soil_sensor_core::should_report(
-            reported.rest_mv,
-            rest_mv,
-            BATTERY_REPORT_DELTA_MV as u32,
-        ) || reported.time_remaining_s.is_some() != time_remaining_s.is_some();
+        let should_report = match reading {
+            Some(reading) => {
+                soil_sensor_core::should_report(
+                    reported.rest_mv,
+                    reading.rest_mv,
+                    BATTERY_REPORT_DELTA_MV as u32,
+                ) || reported.time_remaining_s.is_some() != reading.time_remaining_s.is_some()
+            }
+            None => reported.rest_mv.is_some(),
+        };
 
         if should_report {
-            self.reading.set(percent, rest_mv, time_remaining_s);
+            self.reading.set(reading);
         }
 
-        log::info!(
-            "Battery: {percent}% ({rest_mv} mV, time remaining: {time_remaining_s:?} s, reported change: {should_report})"
-        );
+        match reading {
+            Some(BatteryReading {
+                percent,
+                rest_mv,
+                time_remaining_s,
+            }) => log::info!(
+                "Battery: {percent}% ({rest_mv} mV, time remaining: {time_remaining_s:?} s, reported change: {should_report})"
+            ),
+            None => log::info!("Battery: unknown (reported change: {should_report})"),
+        }
 
         if should_report {
             self.dataver.changed();
@@ -271,12 +285,20 @@ mod tests {
         PowerSourceHandler::new(1, Dataver::new(0), cell)
     }
 
+    fn reading(percent: u8, rest_mv: u32, time_remaining_s: Option<u32>) -> Option<BatteryReading> {
+        Some(BatteryReading {
+            percent,
+            rest_mv,
+            time_remaining_s,
+        })
+    }
+
     #[test]
     fn the_first_reading_always_reports() {
         let handler = handler();
         let before = handler.dataver();
 
-        handler.report(80, 1400, None);
+        handler.report(reading(80, 1400, None));
 
         assert_ne!(handler.dataver(), before);
     }
@@ -284,10 +306,10 @@ mod tests {
     #[test]
     fn voltage_jitter_below_the_deadband_is_not_reported() {
         let handler = handler();
-        handler.report(80, 1400, None);
+        handler.report(reading(80, 1400, None));
         let reported = handler.dataver();
 
-        handler.report(80, 1410, None);
+        handler.report(reading(80, 1410, None));
         assert_eq!(
             handler.dataver(),
             reported,
@@ -298,24 +320,51 @@ mod tests {
     #[test]
     fn a_reading_that_moved_enough_is_reported() {
         let handler = handler();
-        handler.report(80, 1400, None);
+        handler.report(reading(80, 1400, None));
         let reported = handler.dataver();
 
-        handler.report(79, 1380, None);
+        handler.report(reading(79, 1380, None));
         assert_ne!(handler.dataver(), reported);
     }
 
     #[test]
     fn an_estimate_appearing_on_its_own_is_reported() {
         let handler = handler();
-        handler.report(80, 1400, None);
+        handler.report(reading(80, 1400, None));
         let reported = handler.dataver();
 
-        handler.report(80, 1400, Some(3_600));
+        handler.report(reading(80, 1400, Some(3_600)));
         assert_ne!(
             handler.dataver(),
             reported,
             "a new time-remaining estimate is news even when the voltage has not moved"
         );
+    }
+
+    #[test]
+    fn a_cell_taken_out_is_reported_as_unknown() {
+        let handler = handler();
+        handler.report(reading(80, 1400, Some(3_600)));
+        let reported = handler.dataver();
+
+        handler.report(None);
+        assert_ne!(handler.dataver(), reported);
+        assert_eq!(
+            (
+                handler.reading.get().percent,
+                handler.reading.get().rest_mv,
+                handler.reading.get().time_remaining_s
+            ),
+            (None, None, None)
+        );
+    }
+
+    #[test]
+    fn no_cell_from_the_start_is_not_news() {
+        let handler = handler();
+        let before = handler.dataver();
+
+        handler.report(None);
+        assert_eq!(handler.dataver(), before, "the attributes are already null");
     }
 }

@@ -41,6 +41,14 @@ shortly before it is empty.
 
 The value is rounded down to whole percent.
 
+## No cell
+
+A reading below `tuning::BATTERY_PRESENT_MIN_MV` cannot come from an AA cell.
+Even an exhausted one rests well above it. It is what the pin reads when the
+holder is empty and the board runs from USB. The device then reports the
+charge, the voltage and the time remaining as unknown (null), instead of an
+empty cell that asks to be replaced.
+
 ## The time remaining
 
 `BatTimeRemaining` is the charge left, times an assumed capacity, divided by

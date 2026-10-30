@@ -94,6 +94,11 @@ pub const BATTERY_CURVE: [(i32, u32); 6] = [
     (1350, 1000),
 ];
 
+/// Below this, a reading cannot come from an AA cell: even an exhausted one
+/// rests well above it. The holder is empty and the board runs from USB, and
+/// the charge is reported as unknown rather than as an empty cell.
+pub const BATTERY_PRESENT_MIN_MV: u32 = 800;
+
 /// The time remaining is the charge left over an assumed average draw, both
 /// picked on the pessimistic side. Nothing is learned or kept between boots.
 ///

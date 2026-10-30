@@ -25,7 +25,8 @@ use rs_matter_embassy::matter::Matter;
 
 use soil_sensor_core::led::LedCommand;
 use soil_sensor_core::ports::{
-    ButtonEdge, Calibration, Event, IcdState, MatterPorts, OperatingMode, Ports, PowerMode,
+    BatteryReading, ButtonEdge, Calibration, Event, IcdState, MatterPorts, OperatingMode, Ports,
+    PowerMode,
 };
 use soil_sensor_core::time::{Instant as CoreInstant, Millis};
 use soil_sensor_node::{PowerSourceHandler, SoilMeasurementHandler};
@@ -175,9 +176,8 @@ where
         self.soil_handler.report(percent);
     }
 
-    fn report_battery(&mut self, percent: u8, rest_mv: u32, time_remaining_s: Option<u32>) {
-        self.power_handler
-            .report(percent, rest_mv, time_remaining_s);
+    fn report_battery(&mut self, reading: Option<BatteryReading>) {
+        self.power_handler.report(reading);
     }
 
     async fn load_calibration(&mut self) -> Calibration {

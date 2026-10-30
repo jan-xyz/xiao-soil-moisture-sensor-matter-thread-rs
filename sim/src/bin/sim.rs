@@ -75,15 +75,23 @@ fn main() {
             world.awake_ms() / world.boot_count() as u64
         },
     );
-    if let Some(estimate) = world.battery_estimates().last() {
-        let remaining = match estimate.time_remaining_s {
-            Some(s) => format!("{:.0} days", f64::from(s) / 86_400.0),
-            None => "unknown".to_string(),
-        };
-        println!(
-            "battery estimate: {}% left, {remaining} remaining",
-            estimate.percent
-        );
+    match world
+        .battery_estimates()
+        .last()
+        .map(|estimate| estimate.reading)
+    {
+        Some(Some(reading)) => {
+            let remaining = match reading.time_remaining_s {
+                Some(s) => format!("{:.0} days", f64::from(s) / 86_400.0),
+                None => "unknown".to_string(),
+            };
+            println!(
+                "battery estimate: {}% left, {remaining} remaining",
+                reading.percent
+            );
+        }
+        Some(None) => println!("battery estimate: unknown, no cell"),
+        None => {}
     }
 
     if verbose {

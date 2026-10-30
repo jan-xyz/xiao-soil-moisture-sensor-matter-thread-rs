@@ -13,8 +13,8 @@ use std::collections::VecDeque;
 
 use soil_sensor_core::led::LedCommand;
 use soil_sensor_core::ports::{
-    ButtonEdge, Calibration, Event, IcdState, MatterPorts, OperatingMode, Outcome, Ports,
-    PowerMode, WakeCause,
+    BatteryReading, ButtonEdge, Calibration, Event, IcdState, MatterPorts, OperatingMode, Outcome,
+    Ports, PowerMode, WakeCause,
 };
 use soil_sensor_core::time::{Instant as CoreInstant, Millis};
 use soil_sensor_core::tuning;
@@ -97,12 +97,11 @@ pub struct Report {
     pub dataver: u32,
 }
 
-/// One battery estimate the decision layer made.
+/// One battery estimate the decision layer made, or `None` for no cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BatteryEstimate {
     pub at_ms: u64,
-    pub percent: u8,
-    pub time_remaining_s: Option<u32>,
+    pub reading: Option<BatteryReading>,
 }
 
 pub struct World {
@@ -136,7 +135,7 @@ pub struct World {
 
     leds: Vec<(u64, LedCommand)>,
     soil_reports: Vec<Report>,
-    battery_reports: Vec<Report>,
+    battery_reports: Vec<BatteryEstimate>,
     /// Every battery estimate, reported or not.
     battery_estimates: Vec<BatteryEstimate>,
     reboot_count_writes: u32,
@@ -379,7 +378,7 @@ impl World {
         &self.soil_reports
     }
 
-    pub fn battery_reports(&self) -> &[Report] {
+    pub fn battery_reports(&self) -> &[BatteryEstimate] {
         &self.battery_reports
     }
 
@@ -609,23 +608,18 @@ impl Ports for SimPorts<'_> {
         }
     }
 
-    fn report_battery(&mut self, percent: u8, rest_mv: u32, time_remaining_s: Option<u32>) {
-        self.power_handler
-            .report(percent, rest_mv, time_remaining_s);
-        self.world.battery_estimates.push(BatteryEstimate {
+    fn report_battery(&mut self, reading: Option<BatteryReading>) {
+        self.power_handler.report(reading);
+        let estimate = BatteryEstimate {
             at_ms: self.world.clock,
-            percent,
-            time_remaining_s,
-        });
+            reading,
+        };
+        self.world.battery_estimates.push(estimate);
 
         let dataver = self.power_handler.dataver();
         if dataver != self.battery_dataver {
             self.battery_dataver = dataver;
-            self.world.battery_reports.push(Report {
-                at_ms: self.world.clock,
-                percent,
-                dataver,
-            });
+            self.world.battery_reports.push(estimate);
         }
     }
 
