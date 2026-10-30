@@ -59,23 +59,32 @@ pub const BATTERY_SAMPLE_GAP: Millis = Millis::from_millis(20);
 /// chemistry that fits the holder.
 ///
 /// No single curve fits every AA cell. An alkaline cell falls steadily from
-/// about 1.6 V. A NiMH cell sits flat near 1.25 V for most of its life. A
-/// lithium cell sits flat near 1.5 V and then drops fast at the very end. This
-/// curve stays at or below the alkaline and NiMH curves, so it reads a cell as
-/// emptier than it is, never fuller. That is deliberate: a warning that comes
-/// early is a nuisance, and one that comes late is a dead sensor. The points
-/// are typical published curves, not measurements of this board.
+/// about 1.6 V. A NiMH cell starts near 1.35 V and sits flat near 1.25 V for
+/// most of its life. A lithium cell sits flat near 1.5 V and then drops fast at
+/// the very end. One reading cannot tell them apart, so the curve is fitted to
+/// what matters at each end:
 ///
-/// The lithium cell is the exception: the voltage alone reads it as full
-/// until shortly before it is empty.
-pub const BATTERY_CURVE: [(i32, u32); 7] = [
-    (1000, 0),
-    (1100, 50),
-    (1200, 180),
-    (1300, 400),
-    (1400, 650),
-    (1500, 900),
-    (1550, 1000),
+/// - **At the top it is optimistic.** It reads full from the voltage of a
+///   rested full NiMH cell, the lowest of the three, so every fresh cell reads
+///   full.
+/// - **Towards the end it is pessimistic.** In the range where a controller
+///   warns about the battery, it stays under the alkaline and NiMH curves, so
+///   the warning comes early. A warning that comes early is a nuisance, and one
+///   that comes late is a dead sensor.
+///
+/// In between, an alkaline cell reads fuller than it is: at the voltage where
+/// a NiMH cell is still nearly full, an alkaline one is about half empty. The
+/// points are typical published curves, not measurements of this board.
+///
+/// The lithium cell is the exception at the end too: the voltage alone reads
+/// it as full until shortly before it is empty.
+pub const BATTERY_CURVE: [(i32, u32); 6] = [
+    (1100, 0),
+    (1150, 30),
+    (1200, 100),
+    (1250, 400),
+    (1300, 800),
+    (1350, 1000),
 ];
 
 /// The time remaining is the charge left over an assumed average draw, both
@@ -216,3 +225,61 @@ pub const SLEEP_SETTLE: Millis = Millis::from_millis(500);
 /// Never sleep for less than this: the reboot a wake-up costs is worth more
 /// than a shorter sleep saves.
 pub const SLEEP_MIN: Millis = Millis::from_millis(1_000);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::battery_permille;
+
+    struct TestCase {
+        name: &'static str,
+        input_mv: i32,
+        expected_permille: u32,
+    }
+
+    #[test]
+    fn test_battery_curve() {
+        let test_cases = vec![
+            TestCase {
+                name: "a fresh lithium cell reads full",
+                input_mv: 1800,
+                expected_permille: 1000,
+            },
+            TestCase {
+                name: "a fresh alkaline cell reads full",
+                input_mv: 1600,
+                expected_permille: 1000,
+            },
+            TestCase {
+                name: "a rested full NiMH cell reads full",
+                input_mv: 1350,
+                expected_permille: 1000,
+            },
+            TestCase {
+                name: "the end of the NiMH plateau is already a warning",
+                input_mv: 1200,
+                expected_permille: 100,
+            },
+            TestCase {
+                name: "an alkaline cell with a little left is already critical",
+                input_mv: 1150,
+                expected_permille: 30,
+            },
+            TestCase {
+                name: "below the knee of every chemistry reads empty",
+                input_mv: 1050,
+                expected_permille: 0,
+            },
+        ];
+
+        for TestCase {
+            name,
+            input_mv,
+            expected_permille,
+        } in test_cases
+        {
+            let result = battery_permille(input_mv, &BATTERY_CURVE);
+            assert_eq!(result, expected_permille, "Failed case: '{name}'");
+        }
+    }
+}

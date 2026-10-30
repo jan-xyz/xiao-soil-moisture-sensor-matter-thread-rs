@@ -39,8 +39,9 @@ deliberately does not match every feature of the C++ original. See
   below).
 - Battery-shaped `PowerSource` cluster reporting battery %, voltage and an
   estimated time remaining (hand-written handler - see below). Each boot
-  estimates from its own reading, for any kind of AA cell, and errs on the empty
-  side - see [`docs/battery.md`](docs/battery.md).
+  estimates from its own reading, for any kind of AA cell. A fresh cell reads
+  full, and towards the end the estimate errs on the empty side - see
+  [`docs/battery.md`](docs/battery.md).
 - Button: single press samples now, triple click starts the dry/wet
   calibration flow, a long hold factory-resets (erases the Matter fabric and
   reboots). The button also wakes the device from deep sleep.
