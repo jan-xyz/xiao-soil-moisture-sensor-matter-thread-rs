@@ -31,6 +31,12 @@
 /// 802.15.4 receive-queue depth (frames buffered before drops, logged as
 /// "Receive queue full"). The radio driver's own default of 10 is too small for
 /// the bursts a sleepy end device gets after each data poll; the `openthread`
-/// crate raises it to 50. Each queued frame is a ~130-byte heap buffer held
-/// until reset, so 200 caps the worst case at roughly 26 KB.
-pub const THREAD_RX_QUEUE_SIZE: usize = 200;
+/// crate raises it to 50.
+///
+/// A power of two on purpose. The queue is one `VecDeque` of ~130-byte frames
+/// that grows by doubling, inside the receive interrupt, and never shrinks. A
+/// limit of 200 grows it to 256 slots: one ~33 KB block, allocated at whatever
+/// moment a burst arrives, while the old ~17 KB block is still held for the
+/// copy. 128 caps the queue at one ~17 KB block, and a failed allocation there
+/// is a panic in an interrupt handler.
+pub const THREAD_RX_QUEUE_SIZE: usize = 128;
