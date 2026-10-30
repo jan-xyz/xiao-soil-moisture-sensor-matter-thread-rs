@@ -35,12 +35,10 @@ store (flash) persists, everything else is rebuilt. Running thirty simulated day
 ```sh
 make sim ARGS="--days 30"
 ```
-```
-30.0 simulated days | awake 2.71 h (0.377%) | asleep 717.4 h | average 71.0 uA | ~4.0 years on a 2500 mAh AA
-2871 boots | 2871 soil reports | 2871 battery reports | 0 reboot-count writes
-3400 ms awake per boot on average
-battery estimate: 76% left, 402 days remaining
-```
+
+It prints the time spent awake and asleep, the average current and a
+battery-life model, the counts of boots and reports, the average awake time per
+boot, and the device's last battery estimate.
 
 `--verbose` prints one line per boot, with the wake cause, how long it stayed
 awake, and how it ended. `--sit-for N` makes it operate as a short-idle device for

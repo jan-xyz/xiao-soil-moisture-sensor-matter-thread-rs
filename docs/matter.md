@@ -44,8 +44,8 @@ profiles through the ICD Management cluster:
 
 | | Short Idle Time (SIT) | Long Idle Time (LIT) |
 |---|---|---|
-| Slowest polling interval | 15 s | minutes |
-| Reachable | any time, within 15 s | only after a Check-In |
+| Slowest polling interval | seconds | minutes |
+| Reachable | any time, within one polling interval | only after a Check-In |
 | Controller support needed | none | the controller must register |
 | Sleep model here | radio off, CPU awake | deep sleep, CPU off |
 
@@ -70,31 +70,32 @@ Four conditions gate the sleep, all in `App::sleep_for`:
 1. the device must be operating as a LIT;
 2. the protocol stack must be idle;
 3. no gesture may be in progress — a reboot would restart the gesture's timing,
-   and the ten-second factory-reset hold would never complete;
+   and the factory-reset hold would never complete;
 4. the settle delay must have elapsed, so whatever the active period changed
    reaches flash first.
 
 A boot that never becomes a LIT never sleeps at all. That is correct and it is
 also the thing most likely to surprise you: with no controller registered, the
-device sits awake at ~17 mA.
+device sits awake at the idle-CPU current.
 
 ## The active window is the energy budget
 
 Every wake-up is a reboot that then has to attach to Thread, re-register with SRP,
 send its Check-In, let the controller re-subscribe and take its own reading — all
-inside `tuning::ACTIVE_HOLD`, which is six seconds, at ~20–28 mA.
+inside the active window that `tuning::ACTIVE_HOLD` starts and every message
+extends.
 
-That window is worth far more than the sleep it replaces. At fifteen-minute
-wake-ups it dominates everything else:
+That window is worth far more than the sleep it replaces. At one wake-up per
+idle period it dominates everything else:
 
 | | Time | Current |
 |---|---|---|
-| Active window | 6 s per wake-up | ~17 mA (datasheet: modem-sleep, CPU idle, 160 MHz) |
+| Active window | the boot's awake time | ~17 mA (datasheet: modem-sleep, CPU idle, 160 MHz) |
 | Deep sleep | the rest | ~7 µA (datasheet) |
 
-Which works out at roughly 203 µA average and about **1.4 years on a 2500 mAh AA**
-— and that number is a *model*. `make sim` computes it from the datasheet
-currents and the duty cycle the simulation actually produced. It says what the
+`make sim` turns this into an average current and a battery life, and that
+number is a *model*. It computes it from the datasheet currents and the duty
+cycle the simulation actually produced. It says what the
 decisions cost, not what the board draws: the regulators, the flash and the radio
 wake-up cost are all real and all absent from it. Only a power profiler settles
 it.
@@ -128,7 +129,7 @@ if self.clients.is_empty() || self.sit_required {
 
 `clients` is the flat list across **all** fabrics. So the moment *either*
 controller registers for Check-Ins, the whole device flips to LIT and starts
-sleeping for fifteen minutes at a time. The other fabric's controller — which
+sleeping for one idle period at a time. The other fabric's controller — which
 never registered, and may not support LIT at all — loses reachability to the
 device entirely.
 
@@ -149,14 +150,14 @@ The way to tell which mode you are in, from a serial log:
 
 ```
 ICD: idle mode
-Thread SED: Idle / SIT, polling every 15000 ms     <- SIT, awake, ~17 mA
+Thread SED: Idle / SIT, polling every ... ms       <- SIT, awake
 ```
 
 versus the LIT path proving itself:
 
 ```
 ICD: Check-In to fabric 1 node ...
-ICD idle: deep-sleeping for 899500 ms
+ICD idle: deep-sleeping for ...
 ... reboot ...
 Woken up from deep sleep by the timer
 ```

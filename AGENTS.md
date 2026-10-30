@@ -107,7 +107,7 @@ scripts/           the firmware-size helper behind `make size`
   simulation honest.
 - Static allocation via `mk_static!` for anything large or needing a fixed
   address. The Matter stack **must** be static: it needs a stable address and
-  would otherwise blow the ~35-50 KiB program stack.
+  would otherwise blow the program stack.
 - Errors in async hardware paths are usually logged and dropped rather than
   propagated; the firmware favours staying alive.
 - Module-level `//!` doc comments explain *why* - design rationale, spec

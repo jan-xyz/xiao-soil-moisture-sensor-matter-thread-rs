@@ -42,16 +42,16 @@ deliberately does not match every feature of the C++ original. See
   estimates from its own reading, for any kind of AA cell, and errs on the empty
   side - see [`docs/battery.md`](docs/battery.md).
 - Button: single press samples now, triple click starts the dry/wet
-  calibration flow, a 10 s hold factory-resets (erases the Matter fabric and
+  calibration flow, a long hold factory-resets (erases the Matter fabric and
   reboots). The button also wakes the device from deep sleep.
 - Three status LEDs: moisture classification blink (red/yellow/green) and
   calibration-flow feedback.
 - Dry/wet calibration persisted to its own flash partition, independent of
   Matter's own fabric/session persistence - a factory reset does not force a
   recalibration, and vice versa.
-- Background sampling (every 30 s, and once immediately after boot), reporting
-  only when a reading moved enough to matter, so ADC jitter does not wake the
-  Thread radio.
+- Background sampling (on a fixed cadence, and once immediately after boot),
+  reporting only when a reading moved enough to matter, so ADC jitter does not
+  wake the Thread radio.
 - Thread Sleepy End Device with an adaptive duty cycle owned by `rs-matter`'s
   ICD state machine: the receiver is off between data polls, idling at the
   short-idle period or the long-idle one following the controller's ICD
@@ -80,10 +80,10 @@ The device is a Long Idle Time ICD, and it deep-sleeps between wake-ups. While n
 controller has registered for Check-Ins it operates as a Short Idle Time device
 instead and **never sleeps**, because it has to stay reachable within seconds.
 
-The budget is dominated by the ten-second window it must stay awake after each
-wake-up - long enough to attach to Thread, announce itself and take a reading.
-That works out at roughly **1.4 years on a 2500 mAh AA**, and that number is a
-*model* computed by `make sim`, not a measurement.
+The budget is dominated by the window it must stay awake after each wake-up -
+long enough to attach to Thread, announce itself and take a reading. `make sim`
+turns that into a battery life, and that number is a *model*, not a
+measurement.
 
 [`docs/matter.md`](docs/matter.md) has the duty cycle, the table, and what the
 model leaves out.
@@ -101,8 +101,8 @@ Consequences of the deep-sleeping LIT profile (see [Power](#power)):
 
 - **A controller that does not implement LIT gets SIT behaviour.** LIT was only
   certifiable from Matter 1.4, and controller support has been slower still, so
-  the device falls back to polling every 15 s and never deep-sleeps. Expect the
-  SIT-rate battery life on such a controller, not the figures above.
+  the device falls back to the short-idle polling period and never deep-sleeps.
+  Expect the SIT-rate battery life on such a controller, not the LIT one.
 - **Two fabrics is a trap.** The device flips to LIT as soon as *either*
   controller registers for Check-Ins, which leaves the other ecosystem unable to
   reach it. See [`docs/matter.md`](docs/matter.md).
@@ -157,14 +157,11 @@ clear `-Zbuild-std`, and why the dependencies are target-gated - are in
 ```sh
 make sim ARGS="--days 30"
 ```
-```
-30.0 simulated days | awake 8.3 h (1.154%) | asleep 711.7 h | average 203.1 uA | ~1.4 years on a 2500 mAh AA
-2850 boots | 2850 soil reports | 2850 battery reports | 2850 reboot-count writes
-```
 
-It drives the same boot loop the firmware runs, against a scripted world whose
-clock only moves when the code asks it to. See
-[`docs/testing.md`](docs/testing.md) for what it can and cannot tell you.
+It prints the time spent awake and asleep, the average current, a battery-life
+model, and what the device reported. It drives the same boot loop the firmware
+runs, against a scripted world whose clock only moves when the code asks it to.
+See [`docs/testing.md`](docs/testing.md) for what it can and cannot tell you.
 
 ## Commissioning
 

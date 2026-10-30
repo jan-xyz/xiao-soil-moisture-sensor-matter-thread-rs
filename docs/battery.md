@@ -23,8 +23,9 @@ No single curve fits every AA chemistry:
 | Lithium (Li-FeS2) | sits flat near 1.5 V, then drops fast at the very end |
 
 The table stays at or below the alkaline and NiMH curves, so for those two it
-reads too low, never too high. A full NiMH cell therefore reads about 60%. The
-points come from typical published curves, not from measurements of this board.
+reads too low, never too high. A full NiMH cell therefore reads well below
+full. The points come from typical published curves, not from measurements of
+this board.
 
 The lithium cell is the case the voltage cannot handle: it reads as full until
 shortly before it is empty.
@@ -37,25 +38,24 @@ The value is rounded down to whole percent.
 an assumed average draw (`soil_sensor_core::battery_time_remaining_s`). Both
 assumptions are pessimistic:
 
-- **Capacity: 2,000 mAh** (`tuning::BATTERY_CAPACITY_MAH`). Alkaline and NiMH
-  AA cells hold 2,000-2,800 mAh at this tiny drain, a lithium cell about
-  3,000 mAh.
-- **Average draw: about 158 µA** (`tuning::BATTERY_AVERAGE_UA`). One wake-up
-  per idle period, 5 s awake at 25 mA, the rest asleep at 20 µA. The datasheet
-  puts an idle CPU with the radio off at 17 mA and deep sleep at 7 µA. The
-  simulator's wake-ups last about 3.4 s.
+- **Capacity** (`tuning::BATTERY_CAPACITY_MAH`): at the low end of what AA
+  cells hold at this tiny drain.
+- **Average draw** (`tuning::BATTERY_AVERAGE_UA`): one wake-up per idle
+  period, with an awake time, an awake current and a sleep current that are
+  each above the datasheet's figures and above what the simulator's wake-ups
+  take.
 
-A full cell therefore reads about 1.4 years. The simulator's energy model, with
-the datasheet's currents and a 2,500 mAh cell, says about 4 years.
+So the time remaining is shorter than the life `make sim` models. A simulator
+test checks that it stays shorter.
 
 ## What it does not know
 
-- **The real draw and the real capacity.** Both are assumptions. A current
-  measurement of this board would replace them.
+- **The real draw and the real capacity.** Both are assumptions. Nothing on
+  the board measures either.
 - **How fast the cell is really draining.** One reading has no rate. A board
   that draws far more than assumed - like a radio receiver that never turns
   off - shows only as a falling charge, and the time remaining falls with it.
 - **Short-idle operation.** A device that no controller has registered for
-  check-ins never sleeps and draws far more than 158 µA. For it the time
-  remaining is far too long.
+  check-ins never sleeps and draws far more than the assumed average. For it
+  the time remaining is far too long.
 - **A lithium cell's last days.** Its voltage stays high until the end.

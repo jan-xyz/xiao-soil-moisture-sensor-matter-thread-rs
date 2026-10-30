@@ -139,17 +139,17 @@ wake always starts, so a factory reset stays possible.
 The LEDC divisor formula undershoots its valid range at 200 kHz with 8-bit
 resolution unless the APB clock is exactly 80 MHz. Six bits stays valid down to
 40 MHz and is far finer than the two duty values the probe excitation ever asks
-for (0% and 68%).
+for.
 
 ## A sleepy end device receives its downlink in bursts
 
 Frames arrive in a burst after each data poll, which overflows esp-radio's default
 802.15.4 receive queue — logged as `Receive queue full`. The queue depth is raised
-to 128 in `fw/src/board.rs`. The queue is one heap block of ~130-byte frames that
-doubles as it fills and is never given back until reset. That is why the depth is
-a power of two: 200 would round up to a 256-slot block of ~33 KB, allocated
-inside the receive interrupt while the old ~17 KB block is still held for the
-copy. 128 caps the queue at one ~17 KB block.
+in `fw/src/board.rs`. The queue is one heap block of frames that doubles as it
+fills and is never given back until reset. That is why the depth is a power of
+two: any other depth rounds up to the next power of two, and that block is
+allocated inside the receive interrupt while the old block is still held for the
+copy.
 
 ## The EUI-64 must be the same on every boot
 
