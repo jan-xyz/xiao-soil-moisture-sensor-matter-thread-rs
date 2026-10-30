@@ -136,8 +136,8 @@ wake always starts, so a factory reset stays possible.
 
 Nothing else makes a crash visible: the serial console is gone after the first
 deep sleep, and the controller only sees a device that went quiet. So a boot
-that follows a crashed one starts with the error signal on the red LED
-(`LedCommand::error`).
+that follows a crashed one starts with fast red blinks
+(`LedCommand::crashed`). The README lists every LED signal.
 
 ## The status LED driver runs at 6-bit duty resolution
 

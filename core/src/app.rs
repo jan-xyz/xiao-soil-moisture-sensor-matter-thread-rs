@@ -365,7 +365,7 @@ pub async fn run_wake<P: Ports>(ports: &mut P, boot: Boot) -> Result<App, Outcom
     // Nothing else shows a crash: the serial console is gone after the first
     // deep sleep, and the controller only sees a device that went quiet.
     if boot.after_crash {
-        ports.send_led(LedCommand::error());
+        ports.send_led(LedCommand::crashed());
     }
 
     // A press that woke the device is still in progress, so the boot window has

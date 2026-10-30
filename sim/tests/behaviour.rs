@@ -129,7 +129,7 @@ fn a_boot_after_a_crash_says_so_on_the_leds() {
 
     assert_eq!(
         (after_crash, after_next),
-        (vec![LedCommand::error()], vec![LedCommand::error()]),
+        (vec![LedCommand::crashed()], vec![LedCommand::crashed()]),
         "only the boot after the crash blinks"
     );
 }
@@ -295,7 +295,7 @@ fn a_calibration_the_probe_cannot_support_is_rejected() {
     );
     assert_eq!(
         world.leds().last().map(|(_, cmd)| *cmd),
-        Some(LedCommand::error()),
+        Some(LedCommand::calibration_rejected()),
         "the person holding the probe has to learn that it did not take"
     );
 }

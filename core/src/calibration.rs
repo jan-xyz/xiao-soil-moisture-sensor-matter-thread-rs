@@ -37,7 +37,7 @@ pub enum CalibrationOutcome {
 pub async fn run<P: Ports>(ports: &mut P) -> CalibrationOutcome {
     let outcome = capture_and_store(ports).await;
     if let CalibrationOutcome::Rejected(_) = outcome {
-        ports.send_led(LedCommand::error());
+        ports.send_led(LedCommand::calibration_rejected());
     }
     outcome
 }

@@ -50,8 +50,10 @@ pub const SOIL_REPORT_DELTA_PERCENT: u8 = 2;
 pub const MOISTURE_DRY_BELOW_PERCENT: u8 = 23;
 pub const MOISTURE_NORMAL_ABOVE_PERCENT: u8 = 58;
 
-/// The error signal: short, fast red blinks, so it cannot be mistaken for the
-/// one long red blink of a dry reading or the slow ones of the calibration.
+/// The error signals: short, fast blinks, so they cannot be mistaken for the
+/// one long blink of a reading or the slow ones of the calibration. The colour
+/// says which error it is (`LedCommand::crashed`,
+/// `LedCommand::calibration_rejected`).
 pub const ERROR_BLINK_COUNT: u32 = 5;
 pub const ERROR_BLINK_PERIOD: Millis = Millis::from_millis(100);
 

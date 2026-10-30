@@ -45,9 +45,8 @@ deliberately does not match every feature of the C++ original. See
 - Button: single press samples now, triple click starts the dry/wet
   calibration flow, a long hold factory-resets (erases the Matter fabric and
   reboots). The button also wakes the device from deep sleep.
-- Three status LEDs: moisture classification blink (red/yellow/green),
-  calibration-flow feedback, and fast red blinks when a calibration is
-  rejected or the boot before crashed.
+- Three status LEDs: moisture classification, calibration-flow feedback, and
+  error signals - see [Status LEDs](#status-leds).
 - Dry/wet calibration persisted to its own flash partition, independent of
   Matter's own fabric/session persistence - a factory reset does not force a
   recalibration, and vice versa.
@@ -69,6 +68,20 @@ deliberately does not match every feature of the C++ original. See
   `rs-matter`'s `LitIcdMgmtHandler`/`LitIcd`, which sends the Check-In sweep to
   registered clients whose subscription has lapsed, honors `StayActiveRequest`
   and switches between SIT and LIT operation as clients register and unregister.
+
+### Status LEDs
+
+| Signal | Meaning |
+|---|---|
+| One long blink, red / yellow / green | the reading after a single press: dry / almost dry / normal |
+| Slow red blinks | calibration: hold the probe in dry air |
+| Slow green blinks | calibration: hold the probe in water |
+| Fast yellow blinks | the calibration was rejected; the old references are still in effect |
+| Fast red blinks, at the start of a boot | the boot before crashed (a panic, a watchdog reset or a brown-out) |
+
+A calibration is rejected when the dry and wet readings are too close
+together, or when the new references cannot be stored. The counts and periods
+are in `core/src/tuning.rs`.
 
 ### Why hand-written cluster handlers?
 

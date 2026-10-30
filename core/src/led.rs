@@ -30,10 +30,20 @@ impl LedCommand {
         Self::ClassifyMoisture { moisture_percent }
     }
 
-    /// Something went wrong that a person should know about.
-    pub fn error() -> Self {
+    /// The boot before this one crashed.
+    pub fn crashed() -> Self {
+        Self::error(Color::Red)
+    }
+
+    /// The calibration flow ended without new references, so the old ones
+    /// are still in effect.
+    pub fn calibration_rejected() -> Self {
+        Self::error(Color::Yellow)
+    }
+
+    fn error(color: Color) -> Self {
         Self::Blink {
-            color: Color::Red,
+            color,
             count: tuning::ERROR_BLINK_COUNT,
             period: tuning::ERROR_BLINK_PERIOD,
         }
