@@ -133,6 +133,14 @@ whenever the layout changes, or a stale image will be read as if it were current
 The trend type itself is plain data — parallel arrays, no `Option`, no tuples, no
 padding — so that it can be placed there at all, and it clamps its own indices so
 that a torn image degrades to a wrong estimate rather than an out-of-bounds read.
+Its least-squares fit runs in `i128` for the same reason: an image that passes
+the magic check but holds values no cell produces must not overflow, because in a
+debug build an overflow is a panic, and the next boot reads the same image.
+
+A clock that goes backwards restarts the trend. A reset that keeps RTC RAM but
+restarts the RTC timer would otherwise leave samples from the old time base in
+the history, and the trend would stop taking new samples until the new uptime
+caught up with the old one.
 
 ## Two clocks, and they are not interchangeable
 

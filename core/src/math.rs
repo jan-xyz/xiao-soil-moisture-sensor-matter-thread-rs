@@ -97,8 +97,15 @@ impl<const N: usize> DischargeHistory<N> {
         // that outran the guard in `battery.rs` can leave any bit pattern.
         let len = (self.len as usize).min(N);
 
+        // A clock that went backwards restarted while the history survived -
+        // a reset that kept RTC RAM but not the RTC timer. The old samples are
+        // on another time base, and a fit across both would be nonsense.
+        let clock_restarted = self.has_last != 0 && now_s < self.last_s;
+
         let highest_mv = self.sample_mv[..len].iter().copied().max();
-        if matches!(highest_mv, Some(highest_mv) if mv > highest_mv + self.replaced_rise_mv) {
+        let new_cell = matches!(highest_mv, Some(highest_mv) if mv > highest_mv.saturating_add(self.replaced_rise_mv));
+
+        if clock_restarted || new_cell {
             self.len = 0;
             self.next = 0;
             self.has_last = 0;
@@ -136,17 +143,21 @@ impl<const N: usize> DischargeHistory<N> {
             return None;
         }
 
-        let n = len as i64;
-        let mean_t = times.iter().map(|&t| i64::from(t - first_s)).sum::<i64>() / n;
+        // `i128`, because the history can live in RTC RAM and hold any bit
+        // pattern: with `u32` timestamps and `i32` voltages, no product or sum
+        // below can leave it, while `dt * dt` alone already overflows `i64`
+        // for a span past ~3e9 s - a panic on every boot of a debug build.
+        let n = len as i128;
+        let mean_t = times.iter().map(|&t| i128::from(t - first_s)).sum::<i128>() / n;
         let mean_mv = self.sample_mv[..len]
             .iter()
-            .map(|&mv| i64::from(mv))
-            .sum::<i64>()
+            .map(|&mv| i128::from(mv))
+            .sum::<i128>()
             / n;
-        let (cov, var) = (0..len).fold((0i64, 0i64), |(cov, var), i| {
-            let dt = i64::from(times[i] - first_s) - mean_t;
+        let (cov, var) = (0..len).fold((0i128, 0i128), |(cov, var), i| {
+            let dt = i128::from(times[i] - first_s) - mean_t;
             (
-                cov + dt * (i64::from(self.sample_mv[i]) - mean_mv),
+                cov + dt * (i128::from(self.sample_mv[i]) - mean_mv),
                 var + dt * dt,
             )
         });
@@ -154,15 +165,15 @@ impl<const N: usize> DischargeHistory<N> {
             return None;
         }
 
-        let drop_mv = -cov * i64::from(span_s) / var;
-        if drop_mv < i64::from(min_drop_mv) {
+        let drop_mv = -cov * i128::from(span_s) / var;
+        if drop_mv < i128::from(min_drop_mv) {
             return None;
         }
 
-        let last_fit_mv = mean_mv + cov * (i64::from(last_s - first_s) - mean_t) / var;
-        let remaining_s = (last_fit_mv - i64::from(empty_mv)).max(0) * var / -cov;
+        let last_fit_mv = mean_mv + cov * (i128::from(last_s - first_s) - mean_t) / var;
+        let remaining_s = (last_fit_mv - i128::from(empty_mv)).max(0) * var / -cov;
 
-        Some(remaining_s.clamp(0, i64::from(u32::MAX)) as u32)
+        Some(remaining_s.clamp(0, i128::from(u32::MAX)) as u32)
     }
 }
 
@@ -443,6 +454,32 @@ mod tests {
                 input_min_span_s: HOUR_S,
                 input_min_drop_mv: 10,
                 expected: Some(37 * HOUR_S),
+            },
+            DischargeTestCase {
+                name: "a clock that restarted clears the old history",
+                input_samples: &[
+                    (10 * HOUR_S, 1400),
+                    (11 * HOUR_S, 1390),
+                    (0, 1300),
+                    (HOUR_S, 1290),
+                    (2 * HOUR_S, 1280),
+                ],
+                input_interval_s: 0,
+                input_replaced_rise_mv: 100,
+                input_empty_mv: 1000,
+                input_min_span_s: HOUR_S,
+                input_min_drop_mv: 10,
+                expected: Some(28 * HOUR_S),
+            },
+            DischargeTestCase {
+                name: "values no cell produces do not overflow",
+                input_samples: &[(0, i32::MAX), (u32::MAX / 2, 0), (u32::MAX, i32::MIN)],
+                input_interval_s: 0,
+                input_replaced_rise_mv: i32::MAX,
+                input_empty_mv: 1000,
+                input_min_span_s: HOUR_S,
+                input_min_drop_mv: 10,
+                expected: Some(0),
             },
         ];
 
