@@ -134,6 +134,11 @@ RAM. Past `tuning::CRASH_LOOP_BOOTS` the next boot sleeps for
 an idle period before it tries again (`soil_sensor_core::recovery`). A button
 wake always starts, so a factory reset stays possible.
 
+A reset over USB starts the count from zero. Flashing the firmware or attaching
+a monitor resets the chip that way, and the boot it cuts short never reaches a
+planned end. Without this rule, every flash would look like a crash, and RTC RAM
+left over from another firmware could look like a crash loop.
+
 Nothing else makes a crash visible: the serial console is gone after the first
 deep sleep, and the controller only sees a device that went quiet. So a boot
 that follows a crashed one starts with fast red blinks

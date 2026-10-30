@@ -289,11 +289,6 @@ async fn main(s: Spawner) {
         warn!("The previous boot panicked");
     }
 
-    let crashed_boots = store::crashed_boots();
-    if crashed_boots > 0 {
-        warn!("{crashed_boots} boot(s) in a row ended without a planned end (panic, watchdog or brown-out)");
-    }
-
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
@@ -329,7 +324,15 @@ async fn main(s: Spawner) {
 
     // After the yield on purpose: the button task has armed the pin as a wake
     // source by now, so a press still ends a back-off sleep.
-    let recovery = recover(crashed_boots, wake);
+    let crashed_boots = store::crashed_boots();
+    let host_reset = matches!(
+        reset,
+        Some(SocResetReason::CoreUsbUart | SocResetReason::CoreUsbJtag)
+    );
+    let recovery = recover(crashed_boots, wake, host_reset);
+    if recovery.after_crash {
+        warn!("{crashed_boots} boot(s) in a row ended without a planned end (panic, watchdog or brown-out)");
+    }
     store::set_crashed_boots(recovery.crashed_boots);
     if let Some(back_off) = recovery.back_off {
         warn!("Crash loop: sleeping for {back_off} before the next attempt; press the button to try now");
@@ -545,7 +548,7 @@ async fn main(s: Spawner) {
     let boot = Boot {
         wake,
         now: esp_ports.now(),
-        after_crash: crashed_boots > 0,
+        after_crash: recovery.after_crash,
     };
 
     let app = match run_wake(&mut esp_ports, boot).await {
