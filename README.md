@@ -45,8 +45,9 @@ deliberately does not match every feature of the C++ original. See
 - Button: single press samples now, triple click starts the dry/wet
   calibration flow, a long hold factory-resets (erases the Matter fabric and
   reboots). The button also wakes the device from deep sleep.
-- Three status LEDs: moisture classification blink (red/yellow/green) and
-  calibration-flow feedback.
+- Three status LEDs: moisture classification blink (red/yellow/green),
+  calibration-flow feedback, and fast red blinks when a calibration is
+  rejected.
 - Dry/wet calibration persisted to its own flash partition, independent of
   Matter's own fabric/session persistence - a factory reset does not force a
   recalibration, and vice versa.

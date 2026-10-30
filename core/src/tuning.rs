@@ -50,6 +50,11 @@ pub const SOIL_REPORT_DELTA_PERCENT: u8 = 2;
 pub const MOISTURE_DRY_BELOW_PERCENT: u8 = 23;
 pub const MOISTURE_NORMAL_ABOVE_PERCENT: u8 = 58;
 
+/// The error signal: short, fast red blinks, so it cannot be mistaken for the
+/// one long red blink of a dry reading or the slow ones of the calibration.
+pub const ERROR_BLINK_COUNT: u32 = 5;
+pub const ERROR_BLINK_PERIOD: Millis = Millis::from_millis(100);
+
 // --- Battery ----------------------------------------------------------------
 
 pub const BATTERY_SAMPLE_COUNT: u32 = 5;

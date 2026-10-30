@@ -277,6 +277,11 @@ fn a_calibration_the_probe_cannot_support_is_rejected() {
         world.calibration(),
         soil_sensor_core::ports::Calibration::DEFAULT
     );
+    assert_eq!(
+        world.leds().last().map(|(_, cmd)| *cmd),
+        Some(LedCommand::error()),
+        "the person holding the probe has to learn that it did not take"
+    );
 }
 
 #[test]

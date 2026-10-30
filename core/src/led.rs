@@ -30,6 +30,15 @@ impl LedCommand {
         Self::ClassifyMoisture { moisture_percent }
     }
 
+    /// Something went wrong that a person should know about.
+    pub fn error() -> Self {
+        Self::Blink {
+            color: Color::Red,
+            count: tuning::ERROR_BLINK_COUNT,
+            period: tuning::ERROR_BLINK_PERIOD,
+        }
+    }
+
     /// Red = dry, yellow = almost dry, green = normal.
     pub fn color_for(moisture_percent: u8) -> Color {
         if moisture_percent < tuning::MOISTURE_DRY_BELOW_PERCENT {

@@ -31,7 +31,18 @@ pub enum CalibrationOutcome {
 }
 
 /// Run the flow to completion. Returns the references that are now in effect.
+///
+/// A rejected calibration says so on the LEDs: the person holding the probe
+/// would otherwise take the old references for the new ones.
 pub async fn run<P: Ports>(ports: &mut P) -> CalibrationOutcome {
+    let outcome = capture_and_store(ports).await;
+    if let CalibrationOutcome::Rejected(_) = outcome {
+        ports.send_led(LedCommand::error());
+    }
+    outcome
+}
+
+async fn capture_and_store<P: Ports>(ports: &mut P) -> CalibrationOutcome {
     let dry_mv = capture(ports, Color::Red).await;
     let wet_mv = capture(ports, Color::Green).await;
 
