@@ -59,11 +59,16 @@ because nothing has to survive in RAM — the fabrics, the registrations, the
 subscriptions and the Thread attachment are all in flash, and the battery
 estimate needs nothing from an earlier boot.
 
-The CASE resumption records are the exception. `rs-matter` loads them at startup,
-but only its `Matter::run_persist_resumption` task writes them, and nothing in
-this firmware runs that task. So every wake-up starts with an empty cache, and the
-controller's first session of a boot is a full CASE handshake instead of a
-resumption.
+The CASE resumption records need one extra task. CASE is the handshake that
+opens a secure session between the device and a controller. A resumption record
+lets the next session skip most of that handshake. `rs-matter` loads the records
+at startup, and its `Matter::run_persist_resumption` task writes them back after
+every change. The firmware runs that task next to the protocol stack.
+
+The task waits `tuning::RESUMPTION_PERSIST_DEBOUNCE` after a change before it
+writes. Every message keeps the device awake for longer than that, so the last
+change of a boot reaches flash before the deep sleep. A record that is lost or
+unreadable costs one full handshake, and nothing else.
 
 Four conditions gate the sleep, all in `App::sleep_for`:
 

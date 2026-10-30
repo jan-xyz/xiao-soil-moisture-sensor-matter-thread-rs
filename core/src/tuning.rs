@@ -191,6 +191,16 @@ pub const ACTIVE_HOLD: Millis = Millis::from_millis(2_000);
 /// mid-exchange with it.
 pub const ACTIVE_THRESHOLD_MS: u16 = 5_000;
 
+/// How long the protocol stack waits after a change to the CASE resumption
+/// records before it writes them, so that a burst of handshakes costs one
+/// write. Every message keeps the device active for [`ACTIVE_THRESHOLD_MS`],
+/// and the boot then waits [`SLEEP_SETTLE`] before it sleeps. A wait shorter
+/// than the threshold therefore always ends before the deep sleep, and the
+/// last change of a boot still reaches flash.
+pub const RESUMPTION_PERSIST_DEBOUNCE: Millis = Millis::from_millis(1_000);
+
+const _: () = assert!(RESUMPTION_PERSIST_DEBOUNCE.as_millis() < ACTIVE_THRESHOLD_MS as u64);
+
 /// How long the device is kept active for the interactive calibration flow,
 /// which takes far longer than an active window.
 pub const CALIBRATION_ACTIVE_HOLD: Millis = Millis::from_millis(60_000);

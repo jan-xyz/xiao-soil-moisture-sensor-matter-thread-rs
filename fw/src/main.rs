@@ -5,10 +5,11 @@
 //! for. It holds no policy of its own - see `ARCHITECTURE.md`, and the tuning
 //! module in the decision layer, for where the numbers live.
 //!
-//! The task graph is small on purpose: the protocol stack, the boot loop, and
-//! the LED task that must not miss a command while the boot loop is busy. The
-//! button runs from the very start of the boot instead, because its press is
-//! what may have woken the device.
+//! The task graph is small on purpose: the protocol stack with its writer of
+//! the CASE resumption records, the boot loop, and the LED task that must not
+//! miss a command while the boot loop is busy. The button runs from the very
+//! start of the boot instead, because its press is what may have woken the
+//! device.
 
 #![no_std]
 #![no_main]
@@ -18,7 +19,7 @@ use core::pin::pin;
 
 use core::cell::RefCell;
 use embassy_executor::Spawner;
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{select3, Either3};
 
 use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
 use embassy_sync::channel::Channel;
@@ -604,12 +605,31 @@ async fn main(s: Spawner) {
             (),
         ));
 
-        match select(matter, run_boot(&mut esp_ports, app)).await {
-            Either::First(result) => {
+        // A record that never reaches flash costs one full handshake on the
+        // next wake-up, so a failed write is logged, not a reason to crash.
+        let persist_resumption = pin!(async {
+            if let Err(e) = stack
+                .matter()
+                .run_persist_resumption(
+                    &kv,
+                    embassy_time::Duration::from_millis(
+                        tuning::RESUMPTION_PERSIST_DEBOUNCE.as_millis(),
+                    ),
+                )
+                .await
+            {
+                warn!("CASE resumption records persist failed: {e:?}");
+            }
+            core::future::pending::<()>().await
+        });
+
+        match select3(matter, persist_resumption, run_boot(&mut esp_ports, app)).await {
+            Either3::First(result) => {
                 result.unwrap();
                 unreachable!("the protocol stack does not end on its own")
             }
-            Either::Second(outcome) => outcome,
+            Either3::Second(()) => unreachable!("the resumption writer never ends"),
+            Either3::Third(outcome) => outcome,
         }
     };
 
