@@ -274,3 +274,42 @@ pub fn take_panic_flag() -> bool {
     flag.panicked = 0;
     panicked
 }
+
+// --- Retained: the crashed-boot count ----------------------------------------
+
+/// Identifies a crashed-boot count this firmware wrote.
+const CRASHED_BOOTS_MAGIC: u32 = 0x4352_5348; // "CRSH"
+
+/// How many boots in a row ended without a planned end, plus the marker that
+/// says whether the RTC RAM holding it actually contains one. What the count
+/// means is the decision layer's (`soil_sensor_core::recovery`).
+#[repr(C)]
+struct PersistentCrashedBoots {
+    magic: u32,
+    count: u32,
+}
+
+// SAFETY: plain data with no invariants beyond `magic`; the decision layer
+// accepts any count.
+unsafe impl esp_hal::Persistable for PersistentCrashedBoots {}
+
+/// See [`PersistentTrend`] for why this is RTC RAM and never initialised.
+#[ram(unstable(rtc_fast, persistent))]
+static mut CRASHED_BOOTS: PersistentCrashedBoots = PersistentCrashedBoots { magic: 0, count: 0 };
+
+/// The count the previous boot left behind. An RTC RAM image without the
+/// magic is a power-on, which follows no crash.
+pub fn crashed_boots() -> u32 {
+    let crashed = unsafe { &*core::ptr::addr_of!(CRASHED_BOOTS) };
+    if crashed.magic == CRASHED_BOOTS_MAGIC {
+        crashed.count
+    } else {
+        0
+    }
+}
+
+pub fn set_crashed_boots(count: u32) {
+    let crashed = unsafe { &mut *core::ptr::addr_of_mut!(CRASHED_BOOTS) };
+    crashed.count = count;
+    crashed.magic = CRASHED_BOOTS_MAGIC;
+}

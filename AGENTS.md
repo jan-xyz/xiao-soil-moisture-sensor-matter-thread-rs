@@ -87,6 +87,9 @@ scripts/           the firmware-size helper behind `make size`
   `Ports::delay`.** That is where the device layer feeds the hardware watchdog.
   A new wait that bypasses both, or a stretch of work longer than
   `tuning::WATCHDOG_TIMEOUT` between them, resets the chip.
+- **Every planned end of a boot clears the crashed-boot count**
+  (`store::set_crashed_boots(0)`). A new way to end a boot that skips it counts
+  as a crash, and three of those in a row make the next boot back off.
 - **Bump `TREND_MAGIC` if the retained trend's layout changes.** That storage is
   `NOLOAD` RTC RAM and holds whatever was there; the magic is the only thing
   separating a previous wake-up's data from garbage.

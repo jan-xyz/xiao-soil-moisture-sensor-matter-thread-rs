@@ -21,6 +21,7 @@ pub mod calibration;
 pub mod led;
 pub mod math;
 pub mod ports;
+pub mod recovery;
 pub mod time;
 pub mod tuning;
 

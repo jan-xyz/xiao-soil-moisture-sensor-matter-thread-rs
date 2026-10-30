@@ -151,6 +151,13 @@ the device layer feeds it in `Ports::next_event` and `Ports::delay`. Every wait
 of the boot loop goes through one of those two, so the watchdog fires exactly
 when the loop stops waiting. It is turned off before every deep sleep.
 
+A crash that repeats in a boot's startup, for example on a flash error the
+protocol stack cannot get past, would still be a loop: panic, reset, the same
+crash. The count of boots in a row that did not reach a planned end lives in RTC
+RAM next to the trend. Past `tuning::CRASH_LOOP_BOOTS` the next boot sleeps for
+an idle period before it tries again (`soil_sensor_core::recovery`). A button
+wake always starts, so a factory reset stays possible.
+
 ## Two clocks, and they are not interchangeable
 
 - **Boot-relative** (`Ports::now`): milliseconds since this boot began. Used for

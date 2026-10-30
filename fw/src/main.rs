@@ -66,6 +66,7 @@ use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
 
 use soil_sensor_core::app::{run_boot, run_wake, Boot};
 use soil_sensor_core::ports::{ButtonEdge, Outcome, Ports as _, WakeCause};
+use soil_sensor_core::recovery::recover;
 use soil_sensor_core::tuning;
 use soil_sensor_node::{
     BatteryCell, PowerSourceHandler, SoilMeasurementHandler, SoilMoistureCell, DEV_TYPE_SOIL_SENSOR,
@@ -290,6 +291,11 @@ async fn main(s: Spawner) {
         warn!("The previous boot panicked");
     }
 
+    let crashed_boots = store::crashed_boots();
+    if crashed_boots > 0 {
+        warn!("{crashed_boots} boot(s) in a row ended without a planned end (panic, watchdog or brown-out)");
+    }
+
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
@@ -322,6 +328,15 @@ async fn main(s: Spawner) {
     embassy_futures::yield_now().await;
 
     let mut lpwr = LowPower::new(peripherals.LPWR.reborrow());
+
+    // After the yield on purpose: the button task has armed the pin as a wake
+    // source by now, so a press still ends a back-off sleep.
+    let recovery = recover(crashed_boots, wake);
+    store::set_crashed_boots(recovery.crashed_boots);
+    if let Some(back_off) = recovery.back_off {
+        warn!("Crash loop: sleeping for {back_off} before the next attempt; press the button to try now");
+        deep_sleep(&mut lpwr, &rtc, back_off.as_millis());
+    }
 
     // Antenna/RF-switch setup, driven once at boot and held for the firmware's
     // lifetime.
@@ -544,6 +559,7 @@ async fn main(s: Spawner) {
         Err(Outcome::FactoryReset) => {
             warn!("Factory reset requested - erasing Matter fabric state and rebooting");
             stack.reset(&crypto, (NODE, &handler), kv).await.unwrap();
+            store::set_crashed_boots(0);
             esp_hal::system::software_reset()
         }
         Err(outcome) => {
@@ -604,6 +620,7 @@ async fn main(s: Spawner) {
 
     match outcome {
         Outcome::Sleep { for_ms } => {
+            store::set_crashed_boots(0);
             deep_sleep(&mut lpwr, &rtc, for_ms);
         }
         Outcome::FactoryReset => {}
@@ -611,5 +628,6 @@ async fn main(s: Spawner) {
 
     warn!("Factory reset requested - erasing Matter fabric state and rebooting");
     stack.reset(&crypto, (NODE, &handler), kv).await.unwrap();
+    store::set_crashed_boots(0);
     esp_hal::system::software_reset()
 }

@@ -163,6 +163,17 @@ pub const WATCHDOG_TIMEOUT: Millis = Millis::from_secs(120);
 
 const _: () = assert!(WATCHDOG_TIMEOUT.as_millis() >= 2 * SAMPLE_PERIOD.as_millis());
 
+/// How many boots in a row may crash before the next one backs off. A crashed
+/// boot is any boot that did not reach a planned end: a panic, a watchdog
+/// reset, a brown-out.
+pub const CRASH_LOOP_BOOTS: u32 = 3;
+
+/// How long a backing-off boot sleeps before the next attempt. A boot that
+/// crashes in its startup crashes again on the next try, and a loop of those
+/// at full power empties the cell in hours. One attempt per idle period costs
+/// about what an ordinary wake-up does.
+pub const CRASH_LOOP_BACK_OFF: Millis = Millis::from_millis(LIT_POLL_PERIOD_MS as u64);
+
 // --- Sleeping ---------------------------------------------------------------
 
 /// How long to wait after going idle before sleeping, so that the persistence
