@@ -14,10 +14,11 @@ and a reference to a shared cell, and implement `ClusterHandler`.
 
 The battery cluster claims the `BATTERY` feature, which makes `BatChargeLevel`,
 `BatReplacementNeeded` and `BatReplaceability` mandatory, and reports state of
-charge, resting voltage and an estimated time remaining. That last one is a
-least-squares fit through the last twenty-four hours of resting voltage; it needs
-four hours of samples before it will offer a number at all, because a shorter or
-flatter trend is mostly converter noise.
+charge, resting voltage and an estimated time remaining. How the charge and the
+time remaining are estimated is in [`battery.md`](battery.md). The time remaining
+is a least-squares fit through the last twenty-four hours of resting voltage; it
+needs four hours of samples before it will offer a number at all, because a
+shorter or flatter trend is mostly converter noise.
 
 `BatPercentRemaining` is in **half-percent units** — 0 to 200 for 0 to 100% —
 which is a spec subtlety that is easy to get wrong and invisible until a

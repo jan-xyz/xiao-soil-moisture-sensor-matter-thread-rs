@@ -14,6 +14,7 @@ lives where a person would look for it:
 | [`docs/design.md`](docs/design.md) | how this firmware is put together |
 | [`docs/hardware.md`](docs/hardware.md) | the board, and the constraints that bite |
 | [`docs/matter.md`](docs/matter.md) | the Matter side, and what the radio costs |
+| [`docs/battery.md`](docs/battery.md) | how the charge and the time remaining are estimated |
 | [`docs/testing.md`](docs/testing.md) | tests, the simulator, and what is deliberately untested |
 | [`docs/building.md`](docs/building.md) | toolchain, flashing, platform traps |
 

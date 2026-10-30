@@ -55,9 +55,31 @@ pub const MOISTURE_NORMAL_ABOVE_PERCENT: u8 = 58;
 pub const BATTERY_SAMPLE_COUNT: u32 = 5;
 pub const BATTERY_SAMPLE_GAP: Millis = Millis::from_millis(20);
 
-/// Resting-voltage endpoints of the state-of-charge estimate.
-pub const BATTERY_EMPTY_MV: i32 = 1000;
-pub const BATTERY_FULL_MV: i32 = 1500;
+/// The charge left in an AA cell by its resting voltage, in permille, for any
+/// chemistry that fits the holder.
+///
+/// No single curve fits every AA cell. An alkaline cell falls steadily from
+/// about 1.6 V. A NiMH cell sits flat near 1.25 V for most of its life. A
+/// lithium cell sits flat near 1.5 V and then drops fast at the very end. This
+/// curve stays at or below the alkaline and NiMH curves, so it reads a cell as
+/// emptier than it is, never fuller. That is deliberate: a warning that comes
+/// early is a nuisance, and one that comes late is a dead sensor. The points
+/// are typical published curves, not measurements of this board.
+///
+/// The lithium cell is the exception: the voltage alone reads it as full
+/// until shortly before it is empty.
+pub const BATTERY_CURVE: [(i32, u32); 7] = [
+    (1000, 0),
+    (1100, 50),
+    (1200, 180),
+    (1300, 400),
+    (1400, 650),
+    (1500, 900),
+    (1550, 1000),
+];
+
+/// The resting voltage at which the curve reads empty.
+pub const BATTERY_EMPTY_MV: i32 = BATTERY_CURVE[0].0;
 
 /// The trend that estimates remaining life: one sample per interval, this many
 /// samples retained, and the minimum span and fall before an estimate is

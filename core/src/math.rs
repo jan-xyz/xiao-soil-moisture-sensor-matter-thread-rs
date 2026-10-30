@@ -15,15 +15,36 @@ pub fn soil_moisture_percent(mv: i32, dry_mv: i32, wet_mv: i32) -> u8 {
     pct.clamp(0, 100) as u8
 }
 
-/// Linear state-of-charge estimate between `empty_mv` and `full_mv`, clamped
-/// to 0-100%.
-pub fn battery_percent(mv: i32, empty_mv: i32, full_mv: i32) -> u8 {
-    let span = full_mv - empty_mv;
-    if span <= 0 {
+/// The charge left in a cell at resting voltage `mv`, in permille, read off
+/// `curve`: (millivolts, permille) points in rising order, joined by straight
+/// lines and clamped at both ends.
+pub fn battery_permille(mv: i32, curve: &[(i32, u32)]) -> u32 {
+    let (Some(&(lowest_mv, lowest)), Some(&(highest_mv, highest))) = (curve.first(), curve.last())
+    else {
         return 0;
+    };
+    if mv <= lowest_mv {
+        return lowest;
     }
-    let pct = 100 * (mv - empty_mv) / span;
-    pct.clamp(0, 100) as u8
+    if mv >= highest_mv {
+        return highest;
+    }
+
+    curve
+        .windows(2)
+        .find(|pair| mv < pair[1].0)
+        .map(|pair| {
+            let ((from_mv, from), (to_mv, to)) = (pair[0], pair[1]);
+            let span_mv = i64::from(to_mv) - i64::from(from_mv);
+            if span_mv <= 0 {
+                return from;
+            }
+            let rise = i64::from(to) - i64::from(from);
+            let offset = (i64::from(from) + rise * (i64::from(mv) - i64::from(from_mv)) / span_mv)
+                .clamp(0, i64::from(u32::MAX));
+            offset as u32
+        })
+        .unwrap_or(highest)
 }
 
 /// Whether a new reading moved far enough from the last *reported* one to be
@@ -252,67 +273,73 @@ mod tests {
     struct BatteryTestCase {
         name: &'static str,
         input_mv: i32,
-        input_empty_mv: i32,
-        input_full_mv: i32,
-        expected: u8,
+        input_curve: &'static [(i32, u32)],
+        expected: u32,
     }
 
     #[test]
-    fn test_battery_percent() {
+    fn test_battery_permille() {
+        const CURVE: &[(i32, u32)] = &[(1000, 0), (1200, 200), (1500, 1000)];
+
         let test_cases = vec![
             BatteryTestCase {
-                name: "at empty reference reads 0%",
+                name: "at the lowest point reads its charge",
                 input_mv: 1000,
-                input_empty_mv: 1000,
-                input_full_mv: 1500,
+                input_curve: CURVE,
                 expected: 0,
             },
             BatteryTestCase {
-                name: "at full reference reads 100%",
+                name: "at the highest point reads its charge",
                 input_mv: 1500,
-                input_empty_mv: 1000,
-                input_full_mv: 1500,
-                expected: 100,
+                input_curve: CURVE,
+                expected: 1000,
             },
             BatteryTestCase {
-                name: "midpoint reads 50%",
-                input_mv: 1250,
-                input_empty_mv: 1000,
-                input_full_mv: 1500,
-                expected: 50,
-            },
-            BatteryTestCase {
-                name: "below empty clamps to 0%",
-                input_mv: 800,
-                input_empty_mv: 1000,
-                input_full_mv: 1500,
-                expected: 0,
-            },
-            BatteryTestCase {
-                name: "above full clamps to 100%",
-                input_mv: 1800,
-                input_empty_mv: 1000,
-                input_full_mv: 1500,
-                expected: 100,
-            },
-            BatteryTestCase {
-                name: "invalid (non-positive) span reads 0%",
+                name: "at a point in between reads that point",
                 input_mv: 1200,
-                input_empty_mv: 1500,
-                input_full_mv: 1000,
+                input_curve: CURVE,
+                expected: 200,
+            },
+            BatteryTestCase {
+                name: "between two points reads the line that joins them",
+                input_mv: 1350,
+                input_curve: CURVE,
+                expected: 600,
+            },
+            BatteryTestCase {
+                name: "below the curve clamps to the lowest point",
+                input_mv: 800,
+                input_curve: CURVE,
                 expected: 0,
+            },
+            BatteryTestCase {
+                name: "above the curve clamps to the highest point",
+                input_mv: 1800,
+                input_curve: CURVE,
+                expected: 1000,
+            },
+            BatteryTestCase {
+                name: "an empty curve reads empty",
+                input_mv: 1200,
+                input_curve: &[],
+                expected: 0,
+            },
+            BatteryTestCase {
+                name: "a vertical step in the curve reads its top",
+                input_mv: 1200,
+                input_curve: &[(1000, 0), (1200, 300), (1200, 500), (1500, 1000)],
+                expected: 500,
             },
         ];
 
         for BatteryTestCase {
             name,
             input_mv,
-            input_empty_mv,
-            input_full_mv,
+            input_curve,
             expected,
         } in test_cases
         {
-            let result = battery_percent(input_mv, input_empty_mv, input_full_mv);
+            let result = battery_permille(input_mv, input_curve);
             assert_eq!(result, expected, "Failed case: '{name}'");
         }
     }

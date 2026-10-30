@@ -24,7 +24,7 @@ use log::{info, warn};
 use crate::button::{ButtonEvent, ButtonFsm};
 use crate::calibration::{self, CalibrationOutcome};
 use crate::led::LedCommand;
-use crate::math::{battery_percent, soil_moisture_percent};
+use crate::math::{battery_permille, soil_moisture_percent};
 use crate::ports::{
     Event, IcdState, MatterPorts, OperatingMode, Outcome, Ports, PowerMode, Retained, WakeCause,
 };
@@ -263,11 +263,8 @@ impl App {
         }
 
         let battery_mv = ports.read_battery_mv().await;
-        let percent = battery_percent(
-            battery_mv as i32,
-            tuning::BATTERY_EMPTY_MV,
-            tuning::BATTERY_FULL_MV,
-        );
+        // Rounded down, so the reported charge is never more than the curve's.
+        let percent = (battery_permille(battery_mv as i32, &tuning::BATTERY_CURVE) / 10) as u8;
 
         // The trend is timestamped on the clock that survives a reboot, so that
         // readings taken before and after a sleep stay ordered.
