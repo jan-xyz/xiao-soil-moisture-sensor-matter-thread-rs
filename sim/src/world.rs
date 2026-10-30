@@ -148,6 +148,9 @@ pub struct World {
 
     /// A watchdog on the simulation itself, not on the device.
     boot_limit_ms: u64,
+
+    /// Whether the next boot follows one that crashed.
+    after_crash: bool,
 }
 
 impl World {
@@ -178,6 +181,7 @@ impl World {
             boots: Vec::new(),
             awake_ms: 0,
             asleep_ms: 0,
+            after_crash: false,
         }
     }
 
@@ -216,6 +220,14 @@ impl World {
     /// reachable by design.
     pub fn boot_limit(mut self, ms: u64) -> Self {
         self.boot_limit_ms = ms;
+        self
+    }
+
+    /// Make the next boot one that follows a crash. The simulation does not
+    /// crash on its own; this is what the device layer's crashed-boot count
+    /// would tell the boot.
+    pub fn after_crash(mut self) -> Self {
+        self.after_crash = true;
         self
     }
 
@@ -285,6 +297,8 @@ impl World {
         let soil_handler = SoilMeasurementHandler::new(1, Dataver::new(0), cell);
         let power_handler = PowerSourceHandler::new(1, Dataver::new(0), battery_cell);
 
+        let after_crash = core::mem::take(&mut self.after_crash);
+
         // The wake phase: the waking press and the boot's one reading, before
         // any protocol stack exists.
         let app = {
@@ -301,6 +315,7 @@ impl World {
                 soil_sensor_core::app::Boot {
                     wake,
                     now: CoreInstant::ZERO,
+                    after_crash,
                 },
             )) {
                 Ok(app) => app,

@@ -134,6 +134,11 @@ RAM. Past `tuning::CRASH_LOOP_BOOTS` the next boot sleeps for
 an idle period before it tries again (`soil_sensor_core::recovery`). A button
 wake always starts, so a factory reset stays possible.
 
+Nothing else makes a crash visible: the serial console is gone after the first
+deep sleep, and the controller only sees a device that went quiet. So a boot
+that follows a crashed one starts with the error signal on the red LED
+(`LedCommand::error`).
+
 ## The status LED driver runs at 6-bit duty resolution
 
 The LEDC divisor formula undershoots its valid range at 200 kHz with 8-bit

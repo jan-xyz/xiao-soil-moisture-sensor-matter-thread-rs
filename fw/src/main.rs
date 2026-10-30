@@ -544,6 +544,7 @@ async fn main(s: Spawner) {
     let boot = Boot {
         wake,
         now: esp_ports.now(),
+        after_crash: crashed_boots > 0,
     };
 
     let app = match run_wake(&mut esp_ports, boot).await {

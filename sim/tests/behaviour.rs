@@ -119,6 +119,22 @@ fn the_time_remaining_is_more_pessimistic_than_the_energy_model() {
 }
 
 #[test]
+fn a_boot_after_a_crash_says_so_on_the_leds() {
+    let mut world = World::new().after_crash();
+    world.run_boot(WakeCause::Timer);
+    let after_crash: Vec<LedCommand> = world.leds().iter().map(|(_, cmd)| *cmd).collect();
+
+    world.run_boot(WakeCause::Timer);
+    let after_next: Vec<LedCommand> = world.leds().iter().map(|(_, cmd)| *cmd).collect();
+
+    assert_eq!(
+        (after_crash, after_next),
+        (vec![LedCommand::error()], vec![LedCommand::error()]),
+        "only the boot after the crash blinks"
+    );
+}
+
+#[test]
 fn a_single_press_samples_and_says_so_on_the_leds() {
     // A press is what wakes the device in this profile, so the gesture starts
     // at the boot itself rather than at some later moment the boot would never

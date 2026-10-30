@@ -36,6 +36,9 @@ use crate::tuning;
 pub struct Boot {
     pub wake: WakeCause,
     pub now: Instant,
+    /// The boot before this one ended without a planned end: a panic, a
+    /// watchdog reset or a brown-out.
+    pub after_crash: bool,
 }
 
 /// The state of one boot. Volatile by definition: a new boot starts from
@@ -359,6 +362,12 @@ impl App {
 /// that ends the boot before the stack ever matters - a factory reset,
 /// requested by holding the button through the wake phase.
 pub async fn run_wake<P: Ports>(ports: &mut P, boot: Boot) -> Result<App, Outcome> {
+    // Nothing else shows a crash: the serial console is gone after the first
+    // deep sleep, and the controller only sees a device that went quiet.
+    if boot.after_crash {
+        ports.send_led(LedCommand::error());
+    }
+
     // A press that woke the device is still in progress, so the boot window has
     // to be wide enough for the gesture it is part of to finish.
     if boot.wake == WakeCause::Button {
@@ -504,6 +513,7 @@ mod tests {
             Boot {
                 wake: WakeCause::Timer,
                 now: Instant::ZERO,
+                after_crash: false,
             },
             Calibration::DEFAULT,
         );
@@ -540,6 +550,7 @@ mod tests {
             Boot {
                 wake: WakeCause::Timer,
                 now: Instant::ZERO,
+                after_crash: false,
             },
             Calibration::DEFAULT,
         );
@@ -565,6 +576,7 @@ mod tests {
             Boot {
                 wake: WakeCause::Button,
                 now: Instant::from_secs(60),
+                after_crash: false,
             },
             Calibration::DEFAULT,
         );

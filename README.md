@@ -47,7 +47,7 @@ deliberately does not match every feature of the C++ original. See
   reboots). The button also wakes the device from deep sleep.
 - Three status LEDs: moisture classification blink (red/yellow/green),
   calibration-flow feedback, and fast red blinks when a calibration is
-  rejected.
+  rejected or the boot before crashed.
 - Dry/wet calibration persisted to its own flash partition, independent of
   Matter's own fabric/session persistence - a factory reset does not force a
   recalibration, and vice versa.
