@@ -118,30 +118,6 @@ The two live in separate partitions — `nvs` and `calib` — so a Matter factor
 reset does not force a recalibration, and recalibrating does not disturb the
 fabric. See `partitions.csv` for the layout.
 
-## The battery trend lives in RTC RAM
-
-Deep sleep keeps the always-on domain powered, so RTC RAM survives a wake-up —
-and since a wake-up is a reboot, that is the only way a battery trend can
-accumulate across one. A trend in ordinary RAM would restart from nothing every
-fifteen minutes and could never span the four hours an estimate needs.
-
-The storage sits in a `NOLOAD` linker section, which means the initialiser never
-runs and the memory holds whatever was there before. The code therefore gates on
-a magic value and rebuilds the trend when it does not match. Bump that magic
-whenever the layout changes, or a stale image will be read as if it were current.
-
-The trend type itself is plain data — parallel arrays, no `Option`, no tuples, no
-padding — so that it can be placed there at all, and it clamps its own indices so
-that a torn image degrades to a wrong estimate rather than an out-of-bounds read.
-Its least-squares fit runs in `i128` for the same reason: an image that passes
-the magic check but holds values no cell produces must not overflow, because in a
-debug build an overflow is a panic, and the next boot reads the same image.
-
-A clock that goes backwards restarts the trend. A reset that keeps RTC RAM but
-restarts the RTC timer would otherwise leave samples from the old time base in
-the history, and the trend would stop taking new samples until the new uptime
-caught up with the old one.
-
 ## Nothing resets a hung chip, unless the firmware asks for it
 
 `esp_hal::init` turns every watchdog off. A boot that hangs would then keep the
@@ -154,20 +130,9 @@ when the loop stops waiting. It is turned off before every deep sleep.
 A crash that repeats in a boot's startup, for example on a flash error the
 protocol stack cannot get past, would still be a loop: panic, reset, the same
 crash. The count of boots in a row that did not reach a planned end lives in RTC
-RAM next to the trend. Past `tuning::CRASH_LOOP_BOOTS` the next boot sleeps for
+RAM. Past `tuning::CRASH_LOOP_BOOTS` the next boot sleeps for
 an idle period before it tries again (`soil_sensor_core::recovery`). A button
 wake always starts, so a factory reset stays possible.
-
-## Two clocks, and they are not interchangeable
-
-- **Boot-relative** (`Ports::now`): milliseconds since this boot began. Used for
-  every deadline inside a boot. It restarts at zero on every wake-up.
-- **Since power-on** (`Ports::uptime_s`, from the RTC): keeps counting across the
-  reboots a deep sleep ends in. Anything that has to stay ordered across wake-ups
-  — the battery trend — is timestamped with this one.
-
-Using the wrong one is a silent bug: the trend's samples would go backwards on
-every wake-up, and the least-squares fit would quietly produce nonsense.
 
 ## The status LED driver runs at 6-bit duty resolution
 

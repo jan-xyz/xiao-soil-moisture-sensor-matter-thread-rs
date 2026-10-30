@@ -14,8 +14,9 @@
 //! `data_model/1.5/clusters/PowerSourceCluster.xml`). `BatPercentRemaining`
 //! and `BatVoltage` stay optional under `BATTERY` alone, but this is the
 //! whole reason to host the cluster, so they're claimed too. `BatTimeRemaining`
-//! is an estimate from the voltage trend
-//! ([`soil_sensor_core::DischargeHistory`]); the board has no current sensor.
+//! is an estimate from the voltage alone
+//! ([`soil_sensor_core::battery_time_remaining_s`]); the board has no current
+//! sensor.
 
 use core::cell::RefCell;
 

@@ -164,8 +164,7 @@ If a change to one needs a change to the other, the number is in the wrong place
 Three lifetimes, and the decision layer is where each one is declared:
 
 - **Volatile** — the boot itself. Most of `App`.
-- **Retained** — the battery trend, the panic flag and the count of crashed
-  boots, in RTC RAM. Deep sleep keeps that powered, so it survives a wake-up;
+- **Retained** — the panic flag and the count of crashed boots, in RTC RAM. Deep sleep keeps that powered, so it survives a wake-up;
   removing the cell does not, and does not need to.
 - **Durable** — in flash. Matter's own fabrics, sessions, subscriptions and
   registrations in the `nvs` partition; the dry/wet calibration in `calib`,

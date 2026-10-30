@@ -24,9 +24,9 @@ use log::{info, warn};
 use crate::button::{ButtonEvent, ButtonFsm};
 use crate::calibration::{self, CalibrationOutcome};
 use crate::led::LedCommand;
-use crate::math::{battery_permille, soil_moisture_percent};
+use crate::math::{battery_permille, battery_time_remaining_s, soil_moisture_percent};
 use crate::ports::{
-    Event, IcdState, MatterPorts, OperatingMode, Outcome, Ports, PowerMode, Retained, WakeCause,
+    Event, IcdState, MatterPorts, OperatingMode, Outcome, Ports, PowerMode, WakeCause,
 };
 use crate::time::Instant;
 use crate::tuning;
@@ -262,22 +262,19 @@ impl App {
             ports.send_led(LedCommand::classify(percent));
         }
 
+        // From this reading alone: nothing about the battery is kept between
+        // boots, so no stored state can ever be wrong.
         let battery_mv = ports.read_battery_mv().await;
-        // Rounded down, so the reported charge is never more than the curve's.
-        let percent = (battery_permille(battery_mv as i32, &tuning::BATTERY_CURVE) / 10) as u8;
-
-        // The trend is timestamped on the clock that survives a reboot, so that
-        // readings taken before and after a sleep stay ordered.
-        let uptime_s = ports.uptime_s();
-        let trend: &mut Retained = ports.retained();
-        trend.push(uptime_s, battery_mv as i32);
-        let time_remaining_s = trend.time_remaining_s(
-            tuning::BATTERY_EMPTY_MV,
-            tuning::BATTERY_TIME_REMAINING_MIN_SPAN_SECS,
-            tuning::BATTERY_TIME_REMAINING_MIN_DROP_MV,
+        let permille = battery_permille(battery_mv as i32, &tuning::BATTERY_CURVE);
+        let time_remaining_s = battery_time_remaining_s(
+            permille,
+            tuning::BATTERY_CAPACITY_MAH,
+            tuning::BATTERY_AVERAGE_UA,
         );
 
-        ports.report_battery(percent, battery_mv, time_remaining_s);
+        // Rounded down, so the reported charge is never more than the curve's.
+        let percent = (permille / 10) as u8;
+        ports.report_battery(percent, battery_mv, Some(time_remaining_s));
     }
 
     fn persist_reboot_count<P: MatterPorts>(&mut self, ports: &mut P) {
@@ -451,9 +448,6 @@ mod tests {
         fn now(&self) -> Instant {
             self.now
         }
-        fn uptime_s(&self) -> u32 {
-            self.now.as_millis() as u32 / 1000
-        }
         async fn delay(&mut self, d: Millis) {
             self.now = self.now + d;
         }
@@ -481,10 +475,6 @@ mod tests {
         }
         async fn store_calibration(&mut self, _c: Calibration) -> bool {
             true
-        }
-        fn retained(&mut self) -> &mut Retained {
-            static mut TREND: Retained = Retained::new(0, 0);
-            unsafe { &mut *core::ptr::addr_of_mut!(TREND) }
         }
     }
 

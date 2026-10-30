@@ -1,7 +1,7 @@
 //! The cell's resting voltage: an averaged ADC read.
 //!
 //! Like the probe, this decides nothing. The state-of-charge arithmetic and the
-//! discharge trend are in the decision layer; this only produces a voltage.
+//! time remaining are in the decision layer; this only produces a voltage.
 
 use embassy_time::{Duration, Timer};
 use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcChannel, AdcPin};

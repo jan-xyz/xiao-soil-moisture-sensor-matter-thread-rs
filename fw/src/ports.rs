@@ -26,7 +26,6 @@ use rs_matter_embassy::matter::Matter;
 use soil_sensor_core::led::LedCommand;
 use soil_sensor_core::ports::{
     ButtonEdge, Calibration, Event, IcdState, MatterPorts, OperatingMode, Ports, PowerMode,
-    Retained,
 };
 use soil_sensor_core::time::{Instant as CoreInstant, Millis};
 use soil_sensor_node::{PowerSourceHandler, SoilMeasurementHandler};
@@ -96,12 +95,6 @@ where
                 .saturating_duration_since(self.boot_at)
                 .as_millis(),
         )
-    }
-
-    fn uptime_s(&self) -> u32 {
-        // The RTC clock, not the executor's: it keeps counting across the
-        // reboots a deep sleep ends in, which is what the battery trend needs.
-        self.rtc.borrow().time_since_power_up().as_secs() as u32
     }
 
     async fn delay(&mut self, d: Millis) {
@@ -193,10 +186,6 @@ where
 
     async fn store_calibration(&mut self, calibration: Calibration) -> bool {
         store::store_calibration(self.flash, self.calibration_range.clone(), calibration)
-    }
-
-    fn retained(&mut self) -> &mut Retained {
-        store::trend()
     }
 }
 

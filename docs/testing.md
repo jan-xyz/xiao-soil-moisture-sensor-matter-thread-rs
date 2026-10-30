@@ -28,8 +28,7 @@ implementation of the behaviour, free to drift from the real one; a fake of the
 
 Because a boot is a function, the simulator runs many of them in sequence,
 carrying forward only what the state lifetimes say should survive: the durable
-store (flash) and the retained store (RTC RAM) persist, everything else is
-rebuilt. Running thirty simulated days is a loop.
+store (flash) persists, everything else is rebuilt. Running thirty simulated days is a loop.
 
 ## Using it
 
@@ -37,9 +36,10 @@ rebuilt. Running thirty simulated days is a loop.
 make sim ARGS="--days 30"
 ```
 ```
-30.0 simulated days | awake 8.3 h (1.154%) | asleep 711.7 h | average 203.1 uA | ~1.4 years on a 2500 mAh AA
-2850 boots | 2850 soil reports | 2850 battery reports | 2850 reboot-count writes
-10500 ms awake per boot on average | retained trend holds 96 samples
+30.0 simulated days | awake 2.71 h (0.377%) | asleep 717.4 h | average 71.0 uA | ~4.0 years on a 2500 mAh AA
+2871 boots | 2871 soil reports | 2871 battery reports | 0 reboot-count writes
+3400 ms awake per boot on average
+battery estimate: 76% left, 402 days remaining
 ```
 
 `--verbose` prints one line per boot, with the wake cause, how long it stayed

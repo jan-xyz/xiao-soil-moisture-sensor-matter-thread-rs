@@ -254,9 +254,6 @@ async fn main(s: Spawner) {
     // reset a hung chip: it would keep its radio on until the cell is empty.
     // Armed this early so that the seconds of synchronous initialization below
     // are covered too; the boot loop feeds it through the ports.
-    //
-    // The RTC clock keeps counting across deep sleep; it is also the time base
-    // for anything that has to stay ordered across wake-ups.
     let mut rtc = Rtc::new(peripherals.RTC_TIMER);
     rtc.rwdt.set_timeout(
         RwdtStage::Stage0,
@@ -422,9 +419,6 @@ async fn main(s: Spawner) {
     // it, which is why this is a spawned task and not a future under the boot
     // loop's select.
     s.spawn(leds::run(status_leds, LED_CHANNEL.receiver()).unwrap());
-
-    // Restore the retained state from RTC RAM before anything reads it.
-    store::init_trend();
 
     // Flash: one physical peripheral, shared between the protocol stack's own
     // persistence and the calibration store (see `flash.rs`).

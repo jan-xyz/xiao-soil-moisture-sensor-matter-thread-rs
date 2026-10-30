@@ -81,50 +81,40 @@ fn a_scenario_that_never_becomes_long_idle_is_a_clear_failure_not_a_hang() {
 }
 
 #[test]
-fn the_battery_trend_survives_reboots() {
-    // Five hours of wake-ups, with the cell falling a millivolt per reading.
-    let mut world = World::new()
-        .soil(Script::constant(1200))
-        .battery(Script::ramp(1500, 1100, 400));
+fn the_battery_estimate_needs_nothing_from_earlier_boots() {
+    // A cold boot, which has no earlier boot to learn from, against a wake-up
+    // a day later at the same voltage.
+    let mut world = World::new().battery(Script::constant(1400));
+    world.run_boot(WakeCause::Cold);
+    world.run_until(DAY);
 
-    world.run_until(5 * HOUR);
-
-    assert!(
-        world.boot_count() > 10,
-        "expected a wake-up per idle period, got {} boots",
-        world.boot_count()
+    let estimates = world.battery_estimates();
+    let first = estimates.first().expect("an estimate per boot");
+    let last = estimates.last().expect("an estimate per boot");
+    assert_eq!(world.boots()[0].wake, WakeCause::Cold);
+    assert_eq!(
+        (first.percent, first.time_remaining_s),
+        (last.percent, last.time_remaining_s)
     );
-
-    let estimate = world.retained().time_remaining_s(
-        tuning::BATTERY_EMPTY_MV,
-        tuning::BATTERY_TIME_REMAINING_MIN_SPAN_SECS,
-        tuning::BATTERY_TIME_REMAINING_MIN_DROP_MV,
-    );
-    assert!(
-        estimate.is_some(),
-        "the trend has to outlive the reboots, or an estimate is never possible"
-    );
+    assert!(first.time_remaining_s.is_some());
 }
 
 #[test]
-fn a_power_cycle_takes_the_retained_state_with_it() {
-    let mut world = World::new()
-        .battery(Script::ramp(1500, 1100, 400))
-        .power_cycle();
+fn the_time_remaining_is_more_pessimistic_than_the_energy_model() {
+    let mut world = World::new().battery(Script::constant(1550));
+    world.run_until(3 * DAY);
 
-    world.run_until(5 * HOUR);
-    let before = world.retained().len();
+    let energy = Energy::from_world(&world);
+    let modelled_s = energy.life_years(soil_sensor_sim::energy::AA_CAPACITY_MAH) * 365.0 * 86_400.0;
+    let estimated_s = world
+        .battery_estimates()
+        .last()
+        .and_then(|estimate| estimate.time_remaining_s)
+        .expect("every estimate has a time remaining");
 
-    let mut after_power_cycle = World::new()
-        .battery(Script::ramp(1500, 1100, 400))
-        .power_cycle();
-    after_power_cycle.run_until(5 * HOUR);
-
-    assert!(before > 1, "the trend accumulated");
-    assert_eq!(
-        after_power_cycle.retained().len(),
-        before,
-        "and it accumulates the same way from a cold start"
+    assert!(
+        f64::from(estimated_s) < modelled_s,
+        "the estimate ({estimated_s} s) must not promise more than the energy model ({modelled_s:.0} s)"
     );
 }
 
@@ -308,7 +298,6 @@ fn the_reboot_count_counts_reboots_but_not_wakes() {
 
     // Powering on is a reboot, and counts - once per boot, however long the
     // wake cycle around it runs.
-    world = world.power_cycle();
     world.run_boot(WakeCause::Cold);
     world.run_until(world.now_ms() + 3 * HOUR);
 

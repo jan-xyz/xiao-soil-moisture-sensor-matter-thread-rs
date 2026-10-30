@@ -78,20 +78,31 @@ pub const BATTERY_CURVE: [(i32, u32); 7] = [
     (1550, 1000),
 ];
 
-/// The resting voltage at which the curve reads empty.
-pub const BATTERY_EMPTY_MV: i32 = BATTERY_CURVE[0].0;
+/// The time remaining is the charge left over an assumed average draw, both
+/// picked on the pessimistic side. Nothing is learned or kept between boots.
+///
+/// The capacity is on the low side: alkaline and NiMH AA cells hold
+/// 2,000-2,800 mAh at this tiny drain, a lithium cell about 3,000 mAh.
+pub const BATTERY_CAPACITY_MAH: u32 = 2_000;
 
-/// The trend that estimates remaining life: one sample per interval, this many
-/// samples retained, and the minimum span and fall before an estimate is
-/// offered at all. A shorter or flatter trend is mostly noise.
-pub const BATTERY_HISTORY_INTERVAL_SECS: u32 = 900;
-pub const BATTERY_HISTORY_LEN: usize = 96;
-pub const BATTERY_TIME_REMAINING_MIN_SPAN_SECS: u32 = 4 * 3_600;
-pub const BATTERY_TIME_REMAINING_MIN_DROP_MV: i32 = 10;
+/// The draw is on the high side: one wake-up per idle period, awake for
+/// [`BATTERY_AWAKE_PER_WAKE`] at [`BATTERY_AWAKE_UA`], asleep for the rest at
+/// [`BATTERY_ASLEEP_UA`]. The datasheet puts an idle CPU with the radio off at
+/// 17 mA and deep sleep at 7 uA. The radio, the regulator and the rest of the
+/// board come on top, and this board's real figures are not measured. The
+/// simulator's wake-ups last about 3.4 s.
+pub const BATTERY_AWAKE_UA: u32 = 25_000;
+pub const BATTERY_ASLEEP_UA: u32 = 20;
+pub const BATTERY_AWAKE_PER_WAKE: Millis = Millis::from_secs(5);
 
-/// A rise of this much above the highest sample seen means a new cell, and
-/// clears the trend.
-pub const BATTERY_REPLACED_RISE_MV: i32 = 100;
+/// About 158 uA. A short-idle device never sleeps and draws far more, so for
+/// one the time remaining is far too long.
+pub const BATTERY_AVERAGE_UA: u32 = {
+    let awake_ms = BATTERY_AWAKE_PER_WAKE.as_millis();
+    let asleep_ms = LIT_POLL_PERIOD_MS as u64;
+    ((BATTERY_AWAKE_UA as u64 * awake_ms + BATTERY_ASLEEP_UA as u64 * asleep_ms)
+        / (awake_ms + asleep_ms)) as u32
+};
 
 /// How far the resting voltage must move before it is worth a report.
 pub const BATTERY_REPORT_DELTA_MV: i32 = 20;

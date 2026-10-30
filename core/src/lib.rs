@@ -25,5 +25,5 @@ pub mod recovery;
 pub mod time;
 pub mod tuning;
 
-pub use math::{battery_permille, should_report, soil_moisture_percent, DischargeHistory};
+pub use math::{battery_permille, battery_time_remaining_s, should_report, soil_moisture_percent};
 pub use time::{Instant, Millis};

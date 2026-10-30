@@ -91,9 +91,9 @@ scripts/           the firmware-size helper behind `make size`
 - **Every planned end of a boot clears the crashed-boot count**
   (`store::set_crashed_boots(0)`). A new way to end a boot that skips it counts
   as a crash, and three of those in a row make the next boot back off.
-- **Bump `TREND_MAGIC` if the retained trend's layout changes.** That storage is
-  `NOLOAD` RTC RAM and holds whatever was there; the magic is the only thing
-  separating a previous wake-up's data from garbage.
+- **The battery estimate keeps no state.** Each boot estimates from its own
+  reading. Do not add a history, a count or a learned value for it in RTC RAM or
+  flash; that was tried and rejected.
 
 ## Conventions
 

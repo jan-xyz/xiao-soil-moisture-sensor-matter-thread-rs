@@ -1,4 +1,4 @@
-//! The plain arithmetic, and the one piece of state it keeps.
+//! The plain arithmetic.
 //!
 //! Nothing here reads a clock, a pin or a byte of flash, so all of it is
 //! exercised on the host. That is the pattern the rest of the decision layer
@@ -59,143 +59,14 @@ pub fn should_report(last_reported: Option<u32>, current: u32, min_delta: u32) -
     }
 }
 
-/// A ring buffer of battery voltage samples, used to estimate how long the
-/// cell lasts from the rate at which its voltage falls.
-///
-/// The estimate is a least-squares line through the samples, so ADC jitter
-/// between single readings averages out. An alkaline cell does not discharge
-/// linearly: the estimate follows the recent trend, not the full curve.
-///
-/// The layout is deliberately plain data - no `Option`, no tuples, no
-/// padding - so the binary can place it in RTC RAM and have it survive the
-/// deep-sleep reboots a LIT device makes. The binary is the only place that
-/// knows about that; see `battery.rs`.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct DischargeHistory<const N: usize> {
-    sample_s: [u32; N],
-    sample_mv: [i32; N],
-    /// Number of valid samples, `0..=N`.
-    len: u32,
-    /// Where the next sample goes.
-    next: u32,
-    /// The time of the last recorded sample; only meaningful while
-    /// `has_last` is non-zero.
-    last_s: u32,
-    has_last: u32,
-    interval_s: u32,
-    replaced_rise_mv: i32,
-}
-
-impl<const N: usize> DischargeHistory<N> {
-    /// Records at most one sample per `interval_s`. A voltage more than
-    /// `replaced_rise_mv` above the highest recorded sample means a new cell,
-    /// and clears the history.
-    pub const fn new(interval_s: u32, replaced_rise_mv: i32) -> Self {
-        Self {
-            sample_s: [0; N],
-            sample_mv: [0; N],
-            len: 0,
-            next: 0,
-            last_s: 0,
-            has_last: 0,
-            interval_s,
-            replaced_rise_mv,
-        }
-    }
-
-    /// How many samples the trend currently holds.
-    pub fn len(&self) -> usize {
-        (self.len as usize).min(N)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub fn push(&mut self, now_s: u32, mv: i32) {
-        // Clamped rather than trusted: this can live in RTC RAM, where a reset
-        // that outran the guard in `battery.rs` can leave any bit pattern.
-        let len = (self.len as usize).min(N);
-
-        // A clock that went backwards restarted while the history survived -
-        // a reset that kept RTC RAM but not the RTC timer. The old samples are
-        // on another time base, and a fit across both would be nonsense.
-        let clock_restarted = self.has_last != 0 && now_s < self.last_s;
-
-        let highest_mv = self.sample_mv[..len].iter().copied().max();
-        let new_cell = matches!(highest_mv, Some(highest_mv) if mv > highest_mv.saturating_add(self.replaced_rise_mv));
-
-        if clock_restarted || new_cell {
-            self.len = 0;
-            self.next = 0;
-            self.has_last = 0;
-        }
-
-        if self.has_last != 0 && now_s.saturating_sub(self.last_s) < self.interval_s {
-            return;
-        }
-
-        let next = (self.next as usize) % N;
-        self.sample_s[next] = now_s;
-        self.sample_mv[next] = mv;
-        self.next = (next as u32 + 1) % N as u32;
-        self.len = ((self.len as usize).min(N) + 1).min(N) as u32;
-        self.last_s = now_s;
-        self.has_last = 1;
-    }
-
-    /// Seconds until the fitted voltage line reaches `empty_mv`. `None` until
-    /// the samples span at least `min_span_s` and the fitted line fell by at
-    /// least `min_drop_mv` over that span, because a shorter or flatter trend
-    /// is mostly noise.
-    pub fn time_remaining_s(
-        &self,
-        empty_mv: i32,
-        min_span_s: u32,
-        min_drop_mv: i32,
-    ) -> Option<u32> {
-        let len = (self.len as usize).min(N);
-        let times = &self.sample_s[..len];
-        let first_s = times.iter().copied().min()?;
-        let last_s = times.iter().copied().max()?;
-        let span_s = last_s - first_s;
-        if span_s < min_span_s || span_s == 0 {
-            return None;
-        }
-
-        // `i128`, because the history can live in RTC RAM and hold any bit
-        // pattern: with `u32` timestamps and `i32` voltages, no product or sum
-        // below can leave it, while `dt * dt` alone already overflows `i64`
-        // for a span past ~3e9 s - a panic on every boot of a debug build.
-        let n = len as i128;
-        let mean_t = times.iter().map(|&t| i128::from(t - first_s)).sum::<i128>() / n;
-        let mean_mv = self.sample_mv[..len]
-            .iter()
-            .map(|&mv| i128::from(mv))
-            .sum::<i128>()
-            / n;
-        let (cov, var) = (0..len).fold((0i128, 0i128), |(cov, var), i| {
-            let dt = i128::from(times[i] - first_s) - mean_t;
-            (
-                cov + dt * (i128::from(self.sample_mv[i]) - mean_mv),
-                var + dt * dt,
-            )
-        });
-        if var == 0 {
-            return None;
-        }
-
-        let drop_mv = -cov * i128::from(span_s) / var;
-        if drop_mv < i128::from(min_drop_mv) {
-            return None;
-        }
-
-        let last_fit_mv = mean_mv + cov * (i128::from(last_s - first_s) - mean_t) / var;
-        let remaining_s = (last_fit_mv - i128::from(empty_mv)).max(0) * var / -cov;
-
-        Some(remaining_s.clamp(0, i128::from(u32::MAX)) as u32)
-    }
+/// How long `permille` of a cell of `capacity_mah` lasts at an average draw
+/// of `average_ua`, in seconds.
+pub fn battery_time_remaining_s(permille: u32, capacity_mah: u32, average_ua: u32) -> u32 {
+    // 1 mAh is 3,600,000,000 nC, and nC / uA is milliseconds. `u128`, because
+    // no product of these inputs can leave it.
+    let left_nc = u128::from(capacity_mah) * 3_600_000_000 * u128::from(permille) / 1000;
+    let ms = left_nc / u128::from(average_ua.max(1));
+    (ms / 1000).min(u128::from(u32::MAX)) as u32
 }
 
 #[cfg(test)]
@@ -344,190 +215,64 @@ mod tests {
         }
     }
 
-    const HOUR_S: u32 = 3_600;
-
-    struct DischargeTestCase {
+    struct TimeRemainingTestCase {
         name: &'static str,
-        input_samples: &'static [(u32, i32)],
-        input_interval_s: u32,
-        input_replaced_rise_mv: i32,
-        input_empty_mv: i32,
-        input_min_span_s: u32,
-        input_min_drop_mv: i32,
-        expected: Option<u32>,
+        input_permille: u32,
+        input_capacity_mah: u32,
+        input_average_ua: u32,
+        expected: u32,
     }
 
     #[test]
-    fn test_discharge_history_time_remaining() {
+    fn test_battery_time_remaining_s() {
         let test_cases = vec![
-            DischargeTestCase {
-                name: "no samples has no estimate",
-                input_samples: &[],
-                input_interval_s: 0,
-                input_replaced_rise_mv: 100,
-                input_empty_mv: 1000,
-                input_min_span_s: HOUR_S,
-                input_min_drop_mv: 10,
-                expected: None,
+            TimeRemainingTestCase {
+                name: "a full cell lasts its capacity over the current",
+                input_permille: 1000,
+                input_capacity_mah: 2000,
+                input_average_ua: 1000,
+                expected: 2000 * 3600,
             },
-            DischargeTestCase {
-                name: "steady 10 mV per hour fall extrapolates to empty",
-                input_samples: &[(0, 1400), (HOUR_S, 1390), (2 * HOUR_S, 1380)],
-                input_interval_s: 0,
-                input_replaced_rise_mv: 100,
-                input_empty_mv: 1000,
-                input_min_span_s: HOUR_S,
-                input_min_drop_mv: 10,
-                expected: Some(38 * HOUR_S),
+            TimeRemainingTestCase {
+                name: "a cell at a tenth lasts a tenth as long",
+                input_permille: 100,
+                input_capacity_mah: 2000,
+                input_average_ua: 1000,
+                expected: 200 * 3600,
             },
-            DischargeTestCase {
-                name: "jitter around a steady fall averages out",
-                input_samples: &[
-                    (0, 1405),
-                    (HOUR_S, 1385),
-                    (2 * HOUR_S, 1385),
-                    (3 * HOUR_S, 1365),
-                ],
-                input_interval_s: 0,
-                input_replaced_rise_mv: 100,
-                input_empty_mv: 1000,
-                input_min_span_s: HOUR_S,
-                input_min_drop_mv: 10,
-                expected: Some(110_100),
+            TimeRemainingTestCase {
+                name: "an empty cell lasts nothing",
+                input_permille: 0,
+                input_capacity_mah: 2000,
+                input_average_ua: 1000,
+                expected: 0,
             },
-            DischargeTestCase {
-                name: "span shorter than the minimum has no estimate",
-                input_samples: &[(0, 1400), (HOUR_S, 1300)],
-                input_interval_s: 0,
-                input_replaced_rise_mv: 100,
-                input_empty_mv: 1000,
-                input_min_span_s: 2 * HOUR_S,
-                input_min_drop_mv: 10,
-                expected: None,
+            TimeRemainingTestCase {
+                name: "no current does not divide by zero",
+                input_permille: 1000,
+                input_capacity_mah: 1,
+                input_average_ua: 0,
+                expected: 3_600_000,
             },
-            DischargeTestCase {
-                name: "drop smaller than the minimum has no estimate",
-                input_samples: &[(0, 1400), (HOUR_S, 1398), (2 * HOUR_S, 1396)],
-                input_interval_s: 0,
-                input_replaced_rise_mv: 100,
-                input_empty_mv: 1000,
-                input_min_span_s: HOUR_S,
-                input_min_drop_mv: 10,
-                expected: None,
-            },
-            DischargeTestCase {
-                name: "rising voltage has no estimate",
-                input_samples: &[(0, 1380), (HOUR_S, 1390), (2 * HOUR_S, 1400)],
-                input_interval_s: 0,
-                input_replaced_rise_mv: 100,
-                input_empty_mv: 1000,
-                input_min_span_s: HOUR_S,
-                input_min_drop_mv: 10,
-                expected: None,
-            },
-            DischargeTestCase {
-                name: "fitted voltage below empty reads zero",
-                input_samples: &[(0, 1020), (HOUR_S, 1000), (2 * HOUR_S, 980)],
-                input_interval_s: 0,
-                input_replaced_rise_mv: 100,
-                input_empty_mv: 1000,
-                input_min_span_s: HOUR_S,
-                input_min_drop_mv: 10,
-                expected: Some(0),
-            },
-            DischargeTestCase {
-                name: "samples closer than the interval are skipped",
-                input_samples: &[
-                    (0, 1400),
-                    (HOUR_S / 2, 1000),
-                    (HOUR_S, 1390),
-                    (2 * HOUR_S, 1380),
-                ],
-                input_interval_s: HOUR_S,
-                input_replaced_rise_mv: 100,
-                input_empty_mv: 1000,
-                input_min_span_s: HOUR_S,
-                input_min_drop_mv: 10,
-                expected: Some(38 * HOUR_S),
-            },
-            DischargeTestCase {
-                name: "a new cell clears the old history",
-                input_samples: &[
-                    (0, 1100),
-                    (HOUR_S, 1050),
-                    (2 * HOUR_S, 1500),
-                    (3 * HOUR_S, 1490),
-                    (4 * HOUR_S, 1480),
-                ],
-                input_interval_s: 0,
-                input_replaced_rise_mv: 100,
-                input_empty_mv: 1000,
-                input_min_span_s: HOUR_S,
-                input_min_drop_mv: 10,
-                expected: Some(48 * HOUR_S),
-            },
-            DischargeTestCase {
-                name: "a full buffer drops the oldest samples",
-                input_samples: &[
-                    (0, 1500),
-                    (HOUR_S, 1400),
-                    (2 * HOUR_S, 1390),
-                    (3 * HOUR_S, 1380),
-                    (4 * HOUR_S, 1370),
-                ],
-                input_interval_s: 0,
-                input_replaced_rise_mv: 200,
-                input_empty_mv: 1000,
-                input_min_span_s: HOUR_S,
-                input_min_drop_mv: 10,
-                expected: Some(37 * HOUR_S),
-            },
-            DischargeTestCase {
-                name: "a clock that restarted clears the old history",
-                input_samples: &[
-                    (10 * HOUR_S, 1400),
-                    (11 * HOUR_S, 1390),
-                    (0, 1300),
-                    (HOUR_S, 1290),
-                    (2 * HOUR_S, 1280),
-                ],
-                input_interval_s: 0,
-                input_replaced_rise_mv: 100,
-                input_empty_mv: 1000,
-                input_min_span_s: HOUR_S,
-                input_min_drop_mv: 10,
-                expected: Some(28 * HOUR_S),
-            },
-            DischargeTestCase {
-                name: "values no cell produces do not overflow",
-                input_samples: &[(0, i32::MAX), (u32::MAX / 2, 0), (u32::MAX, i32::MIN)],
-                input_interval_s: 0,
-                input_replaced_rise_mv: i32::MAX,
-                input_empty_mv: 1000,
-                input_min_span_s: HOUR_S,
-                input_min_drop_mv: 10,
-                expected: Some(0),
+            TimeRemainingTestCase {
+                name: "a time past the attribute's range clamps",
+                input_permille: u32::MAX,
+                input_capacity_mah: u32::MAX,
+                input_average_ua: 1,
+                expected: u32::MAX,
             },
         ];
 
-        for DischargeTestCase {
+        for TimeRemainingTestCase {
             name,
-            input_samples,
-            input_interval_s,
-            input_replaced_rise_mv,
-            input_empty_mv,
-            input_min_span_s,
-            input_min_drop_mv,
+            input_permille,
+            input_capacity_mah,
+            input_average_ua,
             expected,
         } in test_cases
         {
-            let mut history = DischargeHistory::<4>::new(input_interval_s, input_replaced_rise_mv);
-            for &(now_s, mv) in input_samples {
-                history.push(now_s, mv);
-            }
-
             let result =
-                history.time_remaining_s(input_empty_mv, input_min_span_s, input_min_drop_mv);
+                battery_time_remaining_s(input_permille, input_capacity_mah, input_average_ua);
             assert_eq!(result, expected, "Failed case: '{name}'");
         }
     }

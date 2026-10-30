@@ -14,7 +14,6 @@
 //! hardware.
 
 use crate::led::LedCommand;
-use crate::math::DischargeHistory;
 use crate::time::{Instant, Millis};
 use crate::tuning;
 
@@ -96,9 +95,6 @@ impl Calibration {
     };
 }
 
-/// The state that survives a reboot but not the removal of power.
-pub type Retained = DischargeHistory<{ tuning::BATTERY_HISTORY_LEN }>;
-
 /// Everything a boot's wake phase needs from the world: the waking press
 /// resolved, the boot's one reading taken.
 ///
@@ -111,13 +107,6 @@ pub type Retained = DischargeHistory<{ tuning::BATTERY_HISTORY_LEN }>;
 pub trait Ports {
     /// Milliseconds since this boot began. Use for deadlines within a boot.
     fn now(&self) -> Instant;
-
-    /// Whole seconds since the last power-on reset.
-    ///
-    /// Unlike [`Self::now`] this keeps counting across the reboots a deep sleep
-    /// ends in, so anything that has to stay ordered across wake-ups is
-    /// timestamped with it.
-    fn uptime_s(&self) -> u32;
 
     async fn delay(&mut self, d: Millis);
 
@@ -155,9 +144,6 @@ pub trait Ports {
     /// `false` when the values could not be stored, in which case the previous
     /// calibration stays in effect.
     async fn store_calibration(&mut self, calibration: Calibration) -> bool;
-
-    /// The state that outlives a reboot.
-    fn retained(&mut self) -> &mut Retained;
 }
 
 /// The part of the ports that exists only once the protocol stack does.

@@ -68,14 +68,23 @@ fn main() {
         world.reboot_count_writes(),
     );
     println!(
-        "{} ms awake per boot on average | retained trend holds {} samples",
+        "{} ms awake per boot on average",
         if world.boot_count() == 0 {
             0
         } else {
             world.awake_ms() / world.boot_count() as u64
         },
-        world.retained().len(),
     );
+    if let Some(estimate) = world.battery_estimates().last() {
+        let remaining = match estimate.time_remaining_s {
+            Some(s) => format!("{:.0} days", f64::from(s) / 86_400.0),
+            None => "unknown".to_string(),
+        };
+        println!(
+            "battery estimate: {}% left, {remaining} remaining",
+            estimate.percent
+        );
+    }
 
     if verbose {
         println!();

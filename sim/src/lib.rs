@@ -15,4 +15,4 @@ pub mod energy;
 pub mod world;
 
 pub use energy::Energy;
-pub use world::{BootRecord, Report, Script, World};
+pub use world::{BatteryEstimate, BootRecord, Report, Script, World};

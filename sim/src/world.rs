@@ -1,7 +1,7 @@
 //! A scripted world, and the ports that connect it to the boot loop.
 //!
-//! The world owns everything a boot cannot: the clock, the durable store, the
-//! retained store, and the script of what the sensors and the user do. A boot is
+//! The world owns everything a boot cannot: the clock, the durable store, and
+//! the script of what the sensors and the user do. A boot is
 //! then a function of that state - which is why running thirty simulated days is
 //! just a loop, and why the answer is deterministic.
 //!
@@ -14,7 +14,7 @@ use std::collections::VecDeque;
 use soil_sensor_core::led::LedCommand;
 use soil_sensor_core::ports::{
     ButtonEdge, Calibration, Event, IcdState, MatterPorts, OperatingMode, Outcome, Ports,
-    PowerMode, Retained, WakeCause,
+    PowerMode, WakeCause,
 };
 use soil_sensor_core::time::{Instant as CoreInstant, Millis};
 use soil_sensor_core::tuning;
@@ -97,6 +97,14 @@ pub struct Report {
     pub dataver: u32,
 }
 
+/// One battery estimate the decision layer made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BatteryEstimate {
+    pub at_ms: u64,
+    pub percent: u8,
+    pub time_remaining_s: Option<u32>,
+}
+
 pub struct World {
     /// Virtual milliseconds since the simulation began.
     clock: u64,
@@ -126,12 +134,11 @@ pub struct World {
     /// How many times the calibration has been written.
     calibration_writes: u32,
 
-    /// The retained store. Survives a reboot; `World::power_cycle` clears it.
-    retained: Retained,
-
     leds: Vec<(u64, LedCommand)>,
     soil_reports: Vec<Report>,
     battery_reports: Vec<Report>,
+    /// Every battery estimate, reported or not.
+    battery_estimates: Vec<BatteryEstimate>,
     reboot_count_writes: u32,
     active_requests: Vec<(u64, Option<Millis>)>,
 
@@ -162,13 +169,10 @@ impl World {
             boot_limit_ms: tuning::LIT_POLL_PERIOD_MS as u64 * 4,
             calibration: Calibration::DEFAULT,
             calibration_writes: 0,
-            retained: Retained::new(
-                tuning::BATTERY_HISTORY_INTERVAL_SECS,
-                tuning::BATTERY_REPLACED_RISE_MV,
-            ),
             leds: Vec::new(),
             soil_reports: Vec::new(),
             battery_reports: Vec::new(),
+            battery_estimates: Vec::new(),
             reboot_count_writes: 0,
             active_requests: Vec::new(),
             boots: Vec::new(),
@@ -219,16 +223,6 @@ impl World {
     pub fn press(mut self, at_ms: u64, held_ms: u64) -> Self {
         self.button.push_back((at_ms, ButtonEdge::Falling));
         self.button.push_back((at_ms + held_ms, ButtonEdge::Rising));
-        self
-    }
-
-    /// Pretend the device lost power: the retained store goes with it, the
-    /// durable store does not.
-    pub fn power_cycle(mut self) -> Self {
-        self.retained = Retained::new(
-            tuning::BATTERY_HISTORY_INTERVAL_SECS,
-            tuning::BATTERY_REPLACED_RISE_MV,
-        );
         self
     }
 
@@ -374,6 +368,10 @@ impl World {
         &self.battery_reports
     }
 
+    pub fn battery_estimates(&self) -> &[BatteryEstimate] {
+        &self.battery_estimates
+    }
+
     pub fn active_requests(&self) -> &[(u64, Option<Millis>)] {
         &self.active_requests
     }
@@ -388,11 +386,6 @@ impl World {
 
     pub fn reboot_count_writes(&self) -> u32 {
         self.reboot_count_writes
-    }
-
-    /// The retained trend, as the next boot would find it.
-    pub fn retained(&self) -> &Retained {
-        &self.retained
     }
 
     /// Absolute virtual time of the next scheduled button edge.
@@ -473,11 +466,6 @@ struct SimPorts<'a> {
 impl Ports for SimPorts<'_> {
     fn now(&self) -> CoreInstant {
         CoreInstant::from_millis(self.world.clock - self.world.boot_at)
-    }
-
-    fn uptime_s(&self) -> u32 {
-        // Absolute, not boot-relative: this is the clock that survives a reboot.
-        (self.world.clock / 1000) as u32
     }
 
     async fn delay(&mut self, d: Millis) {
@@ -609,6 +597,11 @@ impl Ports for SimPorts<'_> {
     fn report_battery(&mut self, percent: u8, rest_mv: u32, time_remaining_s: Option<u32>) {
         self.power_handler
             .report(percent, rest_mv, time_remaining_s);
+        self.world.battery_estimates.push(BatteryEstimate {
+            at_ms: self.world.clock,
+            percent,
+            time_remaining_s,
+        });
 
         let dataver = self.power_handler.dataver();
         if dataver != self.battery_dataver {
@@ -629,10 +622,6 @@ impl Ports for SimPorts<'_> {
         self.world.calibration = calibration;
         self.world.calibration_writes += 1;
         true
-    }
-
-    fn retained(&mut self) -> &mut Retained {
-        &mut self.world.retained
     }
 }
 

@@ -15,10 +15,7 @@ and a reference to a shared cell, and implement `ClusterHandler`.
 The battery cluster claims the `BATTERY` feature, which makes `BatChargeLevel`,
 `BatReplacementNeeded` and `BatReplaceability` mandatory, and reports state of
 charge, resting voltage and an estimated time remaining. How the charge and the
-time remaining are estimated is in [`battery.md`](battery.md). The time remaining
-is a least-squares fit through the last twenty-four hours of resting voltage; it
-needs four hours of samples before it will offer a number at all, because a
-shorter or flatter trend is mostly converter noise.
+time remaining are estimated is in [`battery.md`](battery.md).
 
 `BatPercentRemaining` is in **half-percent units** — 0 to 200 for 0 to 100% —
 which is a spec subtlety that is easy to get wrong and invisible until a
@@ -59,8 +56,8 @@ runs the battery down at the SIT rate.
 While operating as a LIT, the device deep-sleeps: CPUs, RAM and every APB-clocked
 peripheral are powered off, and the wake-up is a reboot. That is only affordable
 because nothing has to survive in RAM — the fabrics, the registrations, the
-subscriptions and the Thread attachment are all in flash, and the battery trend
-is in RTC RAM.
+subscriptions and the Thread attachment are all in flash, and the battery
+estimate needs nothing from an earlier boot.
 
 The CASE resumption records are the exception. `rs-matter` loads them at startup,
 but only its `Matter::run_persist_resumption` task writes them, and nothing in

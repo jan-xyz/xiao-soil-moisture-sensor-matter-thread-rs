@@ -38,9 +38,9 @@ deliberately does not match every feature of the C++ original. See
 - `SoilMeasurement` cluster reporting moisture % (hand-written handler - see
   below).
 - Battery-shaped `PowerSource` cluster reporting battery %, voltage and an
-  estimated time remaining from the voltage trend over the last 24 h, available
-  after 4 h of uptime (hand-written handler - see below). The trend lives in RTC
-  RAM, so it survives the reboots a deep-sleeping device makes.
+  estimated time remaining (hand-written handler - see below). Each boot
+  estimates from its own reading, for any kind of AA cell, and errs on the empty
+  side - see [`docs/battery.md`](docs/battery.md).
 - Button: single press samples now, triple click starts the dry/wet
   calibration flow, a 10 s hold factory-resets (erases the Matter fabric and
   reboots). The button also wakes the device from deep sleep.
