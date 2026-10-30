@@ -142,6 +142,15 @@ restarts the RTC timer would otherwise leave samples from the old time base in
 the history, and the trend would stop taking new samples until the new uptime
 caught up with the old one.
 
+## Nothing resets a hung chip, unless the firmware asks for it
+
+`esp_hal::init` turns every watchdog off. A boot that hangs would then keep the
+radio on until the cell is empty, and report nothing on the way. The firmware
+arms the RTC watchdog right after `init`, with `tuning::WATCHDOG_TIMEOUT`, and
+the device layer feeds it in `Ports::next_event` and `Ports::delay`. Every wait
+of the boot loop goes through one of those two, so the watchdog fires exactly
+when the loop stops waiting. It is turned off before every deep sleep.
+
 ## Two clocks, and they are not interchangeable
 
 - **Boot-relative** (`Ports::now`): milliseconds since this boot began. Used for

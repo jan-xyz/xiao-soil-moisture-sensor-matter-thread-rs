@@ -150,6 +150,19 @@ pub const CALIBRATION_ACTIVE_HOLD: Millis = Millis::from_millis(60_000);
 /// stored boundary jumps this far ahead, and equally far across a restart.
 pub const CHECK_IN_COUNTER_EPOCH: u32 = 1_000;
 
+// --- Recovery ---------------------------------------------------------------
+
+/// How long the boot loop may go without waiting for anything before the
+/// hardware watchdog resets the chip. Nothing else ever resets a hung chip, and
+/// a hung chip keeps its radio on until the cell is empty.
+///
+/// The boot loop waits at least once per [`SAMPLE_PERIOD`]. The longest stretch
+/// between two waits is a reading or the protocol stack's startup, and both
+/// take seconds, so four sample periods leave a wide margin.
+pub const WATCHDOG_TIMEOUT: Millis = Millis::from_secs(120);
+
+const _: () = assert!(WATCHDOG_TIMEOUT.as_millis() >= 2 * SAMPLE_PERIOD.as_millis());
+
 // --- Sleeping ---------------------------------------------------------------
 
 /// How long to wait after going idle before sleeping, so that the persistence

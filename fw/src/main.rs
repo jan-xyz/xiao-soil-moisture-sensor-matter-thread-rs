@@ -35,7 +35,7 @@ use esp_hal::ledc::timer::{self, TimerIFace};
 use esp_hal::ledc::{LSGlobalClkSource, Ledc, LowSpeed};
 use esp_hal::ram;
 use esp_hal::rtc_cntl::sleep::{LowPower, RtcSleepConfig};
-use esp_hal::rtc_cntl::{wakeup_cause, Rtc, SocResetReason, WakeupSource};
+use esp_hal::rtc_cntl::{wakeup_cause, Rtc, RwdtStage, SocResetReason, WakeupSource};
 use esp_hal::timer::timg::TimerGroup;
 use esp_metadata_generated::memory_range;
 use esp_storage::FlashStorage;
@@ -183,6 +183,20 @@ extern "Rust" fn custom_halt() -> ! {
     esp_hal::system::software_reset()
 }
 
+/// The planned end of a boot that sleeps. Never returns: the wake-up is a
+/// reboot.
+///
+/// The watchdog is turned off first. It is configured to pause in sleep, but
+/// a sleep that outlasts its timeout must not depend on that: the next boot's
+/// `esp_hal::init` turns it off anyway, and this boot arms it again.
+fn deep_sleep(lpwr: &mut LowPower<'_>, rtc: &RefCell<Rtc<'_>>, for_ms: u64) -> ! {
+    rtc.borrow_mut().rwdt.disable();
+    lpwr.set_wakeup_deadline(
+        esp_hal::time::Instant::now() + esp_hal::time::Duration::from_millis(for_ms),
+    );
+    lpwr.sleep_deep(RtcSleepConfig::deep())
+}
+
 /// The ICD Management cluster metadata, exactly as served by
 /// [`LitIcdMgmtHandler`].
 const ICD_MGMT_CLUSTER: Cluster<'static> = LitIcdMgmtHandler::CLUSTER;
@@ -234,6 +248,21 @@ async fn main(s: Spawner) {
     heap_allocator!(#[ram(reclaimed)] size: RECLAIMED_RAM);
 
     let mut peripherals = esp_hal::init(esp_hal::Config::default());
+
+    // `esp_hal::init` turns every watchdog off, and nothing else would ever
+    // reset a hung chip: it would keep its radio on until the cell is empty.
+    // Armed this early so that the seconds of synchronous initialization below
+    // are covered too; the boot loop feeds it through the ports.
+    //
+    // The RTC clock keeps counting across deep sleep; it is also the time base
+    // for anything that has to stay ordered across wake-ups.
+    let mut rtc = Rtc::new(peripherals.RTC_TIMER);
+    rtc.rwdt.set_timeout(
+        RwdtStage::Stage0,
+        esp_hal::time::Duration::from_millis(tuning::WATCHDOG_TIMEOUT.as_millis()),
+    );
+    rtc.rwdt.enable();
+    let rtc = RefCell::new(rtc);
 
     // A long-idle device spends most of its life asleep, and a wake-up is a
     // reboot - so "why did this boot happen" is the first thing worth knowing.
@@ -291,6 +320,8 @@ async fn main(s: Spawner) {
     // in its mid-press start, would read the tap as a hold and factory-reset
     // the device ten seconds in.
     embassy_futures::yield_now().await;
+
+    let mut lpwr = LowPower::new(peripherals.LPWR.reborrow());
 
     // Antenna/RF-switch setup, driven once at boot and held for the firmware's
     // lifetime.
@@ -377,10 +408,6 @@ async fn main(s: Spawner) {
     // loop's select.
     s.spawn(leds::run(status_leds, LED_CHANNEL.receiver()).unwrap());
 
-    // The RTC clock keeps counting across deep sleep; it is the time base for
-    // anything that has to stay ordered across wake-ups.
-    let rtc = Rtc::new(peripherals.RTC_TIMER);
-
     // Restore the retained state from RTC RAM before anything reads it.
     store::init_trend();
 
@@ -446,8 +473,6 @@ async fn main(s: Spawner) {
         tuning::SIT_POLL_PERIOD_MS,
     ));
     let icd = lit.icd();
-
-    let mut lpwr = LowPower::new(peripherals.LPWR.reborrow());
 
     // NB: `EmptyHandler::chain` wraps LIFO - the *last* chained matcher is
     // evaluated first. The broad root matcher must be chained BEFORE the ICD
@@ -579,11 +604,7 @@ async fn main(s: Spawner) {
 
     match outcome {
         Outcome::Sleep { for_ms } => {
-            // Never returns: the wake-up is a reboot.
-            lpwr.set_wakeup_deadline(
-                esp_hal::time::Instant::now() + esp_hal::time::Duration::from_millis(for_ms),
-            );
-            lpwr.sleep_deep(RtcSleepConfig::deep());
+            deep_sleep(&mut lpwr, &rtc, for_ms);
         }
         Outcome::FactoryReset => {}
     }

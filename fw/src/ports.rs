@@ -11,6 +11,7 @@
 //! world rather than a decision, and the simulation implements it with the same
 //! meaning against a clock it controls.
 
+use core::cell::RefCell;
 use core::ops::Range;
 
 use embassy_futures::select::{select3, Either3};
@@ -47,7 +48,9 @@ where
     pub adc: Adc<'a, ADC1<'a>, Async>,
     pub leds: LedSender<'static>,
     pub edges: EdgeReceiver<'static>,
-    pub rtc: &'a Rtc<'d>,
+    /// Shared with the composition root, which turns the watchdog off before a
+    /// deep sleep.
+    pub rtc: &'a RefCell<Rtc<'d>>,
     pub icd: &'static Icd,
     pub flash: SharedFlash<'a, 'd>,
     pub calibration_range: Range<u32>,
@@ -72,6 +75,14 @@ where
     pub fn attach(&mut self, matter: &'a Matter<'a>, kv: SharedKvStore) {
         self.matter = Some((matter, kv));
     }
+
+    /// The boot loop is alive. Fed from the two calls every wait of the boot
+    /// loop goes through, so the watchdog fires exactly when the loop stops
+    /// waiting: when something hogs the executor, or the loop never gets back
+    /// to it. See `tuning::WATCHDOG_TIMEOUT` for the margin this relies on.
+    fn feed_watchdog(&self) {
+        self.rtc.borrow_mut().rwdt.feed();
+    }
 }
 
 impl<SoilPin, BatPin> Ports for EspPorts<'_, '_, SoilPin, BatPin>
@@ -90,14 +101,17 @@ where
     fn uptime_s(&self) -> u32 {
         // The RTC clock, not the executor's: it keeps counting across the
         // reboots a deep sleep ends in, which is what the battery trend needs.
-        self.rtc.time_since_power_up().as_secs() as u32
+        self.rtc.borrow().time_since_power_up().as_secs() as u32
     }
 
     async fn delay(&mut self, d: Millis) {
+        self.feed_watchdog();
         Timer::after(Duration::from_millis(d.as_millis())).await;
     }
 
     async fn next_event(&mut self, deadline: CoreInstant) -> Event {
+        self.feed_watchdog();
+
         let remaining = deadline.saturating_since(self.now());
         let until = embassy_time::Instant::now()
             + embassy_time::Duration::from_millis(remaining.as_millis());
