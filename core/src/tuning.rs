@@ -90,13 +90,13 @@ pub const BATTERY_CAPACITY_MAH: u32 = 2_000;
 /// [`BATTERY_ASLEEP_UA`]. The datasheet puts an idle CPU with the radio off at
 /// 17 mA and deep sleep at 7 uA. The radio, the regulator and the rest of the
 /// board come on top, and this board's real figures are not measured. The
-/// simulator's wake-ups last about 3.4 s.
+/// awake time is above what the simulator's wake-ups take.
 pub const BATTERY_AWAKE_UA: u32 = 25_000;
 pub const BATTERY_ASLEEP_UA: u32 = 20;
 pub const BATTERY_AWAKE_PER_WAKE: Millis = Millis::from_secs(5);
 
-/// About 158 uA. A short-idle device never sleeps and draws far more, so for
-/// one the time remaining is far too long.
+/// A short-idle device never sleeps and draws far more, so for one the time
+/// remaining is far too long.
 pub const BATTERY_AVERAGE_UA: u32 = {
     let awake_ms = BATTERY_AWAKE_PER_WAKE.as_millis();
     let asleep_ms = LIT_POLL_PERIOD_MS as u64;

@@ -5,7 +5,7 @@
 //!
 //!   single press  -> sample now, and say how wet it is
 //!   triple press  -> start the dry/wet calibration flow
-//!   10 s hold     -> factory reset
+//!   long hold     -> factory reset
 //!
 //! The state machine is driven entirely by edges and by the passing of its own
 //! deadlines, so it can be walked through a whole gesture in a test without a
@@ -153,8 +153,8 @@ impl ButtonFsm {
     }
 
     /// Whether a gesture is in progress. A boot must not end while this is
-    /// true: a reboot would restart the gesture's timing, and the 10 s hold
-    /// would never complete.
+    /// true: a reboot would restart the gesture's timing, and the factory-reset
+    /// hold would never complete.
     pub fn is_active(&self) -> bool {
         self.state != State::Idle
     }
