@@ -57,9 +57,15 @@ runs the battery down at the SIT rate.
 
 While operating as a LIT, the device deep-sleeps: CPUs, RAM and every APB-clocked
 peripheral are powered off, and the wake-up is a reboot. That is only affordable
-because nothing has to survive in RAM — the fabrics, the registrations, the CASE
-resumption records, the subscriptions and the Thread attachment are all in flash,
-and the battery trend is in RTC RAM.
+because nothing has to survive in RAM — the fabrics, the registrations, the
+subscriptions and the Thread attachment are all in flash, and the battery trend
+is in RTC RAM.
+
+The CASE resumption records are the exception. `rs-matter` loads them at startup,
+but only its `Matter::run_persist_resumption` task writes them, and nothing in
+this firmware runs that task. So every wake-up starts with an empty cache, and the
+controller's first session of a boot is a full CASE handshake instead of a
+resumption.
 
 Four conditions gate the sleep, all in `App::sleep_for`:
 
