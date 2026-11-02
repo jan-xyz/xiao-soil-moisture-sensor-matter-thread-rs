@@ -118,20 +118,21 @@ live, and where nothing device-specific may appear.
 ## The pinned forks
 
 Nothing here comes from the registry except the chip support crates. The
-workspace's `[patch.crates-io]` redirects four of them:
+workspace's `[patch.crates-io]` redirects them:
 
 | Crate | Where it comes from | Why |
 |---|---|---|
-| `rs-matter-embassy` | `sysgrok/rs-matter-embassy`, `master` | the ICD work and the KV cache (PR 91) are merged but unreleased |
-| `rs-matter` | `project-chip/rs-matter`, `main` | the ICD and subscription work, and the `Send + Sync` rework the newer rs-matter-embassy needs, are past the published `0.4.1` |
-| `rs-matter-stack` | `sysgrok/rs-matter-stack`, `master` | periodic polling that costs power with Thread, and network diagnostics, are unreleased; the pin tracks the rs-matter `Send + Sync` rework |
+| `rs-matter-embassy` | `sysgrok/rs-matter-embassy`, `master` | the ICD work, the KV cache (PR 91) and the move of `rs-matter-stack` upstream (PR 92) are merged but unreleased |
+| `rs-matter` | `project-chip/rs-matter`, `main` | the ICD and subscription work, the `Send + Sync` rework, the micro-crate split, and the MRP backoff accounting for an ICD sender's own polling interval (#638) are past the published `0.4.1` |
 | `openthread` | `esp-rs/openthread`, `main` | CSL and the radio sleep API, unreleased |
 | `esp-hal` and friends | `ivmarkov/esp-hal`, `ieee802154-sleep` | `Ieee802154::stop_receive` / `EspRadio::set_sleep`, so the SED receiver is off between polls |
 
 The `esp-hal` one is the last real fork: upstream `openthread`'s ESP radio still
 carries a `TODO: Upstream in esp-radio a stop_receive counterpart to the existing
 start_receive`, so the sleep path depends on it. Everything else is an unreleased
-commit on a project's own repository.
+commit on a project's own repository. (`rs-matter-stack` is no longer a pin at
+all: upstream absorbed it, and the archived `sysgrok` repository only tracks a
+pre-micro-crate `rs-matter`.)
 
 Each is pinned by revision rather than by branch, so an upstream push cannot
 change what this firmware builds. Moving a pin means rebuilding and re-flashing;

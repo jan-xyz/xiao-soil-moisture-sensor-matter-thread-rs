@@ -47,7 +47,6 @@ use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
 use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::decl::soil_measurement::ClusterHandler as _;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
-use rs_matter_embassy::matter::dm::clusters::gen_diag::BootReasonEnum;
 use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{
     ClusterHandler as _, IcdModeConfig, LitIcd, LitIcdMgmtHandler,
 };
@@ -58,11 +57,12 @@ use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ROOT_NODE;
 use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
 use rs_matter_embassy::matter::dm::{Async, Cluster, Dataver, EmptyHandler, Endpoint, Node};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
+use rs_matter_embassy::matter::BootReason;
 use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
 use rs_matter_embassy::persist::SeqMapKvBlobStore;
-use rs_matter_embassy::stack::rand::rand_core::SeedableRng;
-use rs_matter_embassy::stack::rand::ChaCha12Rng;
-use rs_matter_embassy::wireless::esp::EspThreadDriver;
+use rs_matter_embassy::rand::rand_core::SeedableRng;
+use rs_matter_embassy::rand::ChaCha12Rng;
+use rs_matter_embassy::wireless::esp::EspThreadRadio;
 use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
 
 use soil_sensor_core::app::{run_boot, run_wake, Boot};
@@ -161,16 +161,16 @@ fn serial_no_from_efuse() -> &'static str {
 /// reason. The C6's ROM reports a brown-out with the same code as a power-on,
 /// so a sagging cell looks like a power cycle here; the distinction the spec
 /// draws between hardware and software watchdogs is kept.
-fn boot_reason(reset: Option<SocResetReason>) -> BootReasonEnum {
+fn boot_reason(reset: Option<SocResetReason>) -> BootReason {
     use SocResetReason::{ChipPowerOn, CoreDeepSleep, CoreRtcWdt, CoreSw, Cpu0Sw, SysRtcWdt};
 
     match reset {
-        Some(CoreDeepSleep) => BootReasonEnum::Unspecified,
-        Some(ChipPowerOn) => BootReasonEnum::PowerOnReboot,
-        Some(CoreSw | Cpu0Sw) => BootReasonEnum::SoftwareReset,
-        Some(CoreRtcWdt | SysRtcWdt) => BootReasonEnum::HardwareWatchdogReset,
-        Some(_) => BootReasonEnum::SoftwareWatchdogReset,
-        None => BootReasonEnum::Unspecified,
+        Some(CoreDeepSleep) => BootReason::Unspecified,
+        Some(ChipPowerOn) => BootReason::PowerOnReboot,
+        Some(CoreSw | Cpu0Sw) => BootReason::SoftwareReset,
+        Some(CoreRtcWdt | SysRtcWdt) => BootReason::HardwareWatchdogReset,
+        Some(_) => BootReason::SoftwareWatchdogReset,
+        None => BootReason::Unspecified,
     }
 }
 
@@ -373,7 +373,7 @@ async fn main(s: Spawner) {
     // Must be stable across reboots: Thread's SRP client registers services
     // keyed by identifiers tied to this EUI64, and a fresh random one each boot
     // makes the same service look like a new host (see AGENTS.md).
-    let ieee_eui64 = EspThreadDriver::ieee_eui64();
+    let ieee_eui64 = EspThreadRadio::ieee_eui64();
 
     // ADC1 is free now: one config hosts both the soil probe and the battery
     // channel, matching the board's shared-ADC-unit constraint.
@@ -495,13 +495,17 @@ async fn main(s: Spawner) {
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
             Async(EmbassyThreadMatterStack::<0, ()>::root_handler(
+                stack.matter(),
                 &(),
                 &mut weak_rand,
             )),
         )
         .chain(
             |e, c| e == ROOT_ENDPOINT_ID && c == ICD_MGMT_CLUSTER.id,
-            Async(LitIcdMgmtHandler::new(Dataver::new_rand(&mut weak_rand), lit).adapt()),
+            Async(
+                LitIcdMgmtHandler::new(Dataver::new_rand(&mut weak_rand), stack.matter(), lit)
+                    .adapt(),
+            ),
         )
         .chain(
             |e, c| e == SOIL_ENDPOINT_ID && c == SoilMeasurementHandler::CLUSTER.id,
@@ -593,7 +597,7 @@ async fn main(s: Spawner) {
 
         let matter = pin!(stack.run_coex(
             EmbassyThread::new(
-                EspThreadDriver::new(peripherals.IEEE802154.reborrow(), peripherals.BT.reborrow(),)
+                EspThreadRadio::new(peripherals.IEEE802154.reborrow(), peripherals.BT.reborrow(),)
                     .with_rx_queue_size(board::THREAD_RX_QUEUE_SIZE),
                 crypto.rand().unwrap(),
                 ieee_eui64,

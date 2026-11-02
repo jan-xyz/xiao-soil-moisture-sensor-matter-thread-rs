@@ -22,11 +22,13 @@ opt-level = "s"
 
 [patch.crates-io]
 # The ICD work - the `Icd` power mode state machine, the subscription keep-alive
-# reporting, the `Send + Sync` rework the newer rs-matter-embassy builds on - is
-# past the published releases.
+# reporting, the `Send + Sync` rework the newer rs-matter-embassy builds on, and
+# the MRP backoff accounting for an ICD sender's own polling interval (#638) -
+# is past the published releases.
 # `docs/building.md` has the whole pin set and why each one exists.
-rs-matter = { git = "https://github.com/project-chip/rs-matter", rev = "846073fc78e4bf540203e33c7638dd4751381dca" }
-rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack", rev = "8937475a1f808fd17d7cd5c949ee0f0a5e9d3074" }
+# `rs-matter-stack` is gone from the pin set: upstream absorbed it (#636), and
+# the archived sysgrok repository's last revision only tracks a pre-`#634` main.
+rs-matter = { git = "https://github.com/project-chip/rs-matter", rev = "9e14c7c269d05c6b6134c75fe56ce7852576846c" }
 
 # The CSL API and the radio sleep path the SED driver needs, unreleased.
 openthread = { git = "https://github.com/esp-rs/openthread", rev = "705c5576ccfd7b417cfa4b23912a13b1b99e01f2" }

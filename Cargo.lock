@@ -131,6 +131,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-channel"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2"
+dependencies = [
+ "concurrent-queue",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "async-io"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1074,22 +1086,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "415b6ec780d34dcf624666747194393603d0373b7141eef01d12ee58881507d9"
 dependencies = [
  "phf",
-]
-
-[[package]]
-name = "edge-mdns"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4c32f19b7b4fb455e0bc270bcfe8ca595813ea935a2606447a32fe99b0b1843"
-dependencies = [
- "domain",
- "edge-nal",
- "embassy-futures",
- "embassy-sync 0.8.0",
- "embassy-time",
- "heapless 0.9.3",
- "log",
- "rand_core 0.10.1",
 ]
 
 [[package]]
@@ -2062,6 +2058,26 @@ source = "git+https://github.com/esp-rs/esp-pacs.git?rev=33d9b66#33d9b665f3f9a36
 dependencies = [
  "critical-section",
  "vcell",
+]
+
+[[package]]
+name = "event-listener"
+version = "5.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
+dependencies = [
+ "parking",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "event-listener-strategy"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
+dependencies = [
+ "event-listener",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -3653,46 +3669,67 @@ dependencies = [
 [[package]]
 name = "rs-matter"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=846073fc78e4bf540203e33c7638dd4751381dca#846073fc78e4bf540203e33c7638dd4751381dca"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
 dependencies = [
- "async-io",
  "bitflags 2.13.2",
- "cfg-if",
- "critical-section",
  "defmt",
- "der",
- "domain",
- "either",
- "embassy-futures",
- "embassy-sync 0.8.0",
- "embassy-time",
- "embedded-io-async 0.7.0",
- "heapless 0.9.3",
- "if-addrs",
  "log",
- "mbedtls-rs-sys",
- "nix 0.31.3",
+ "rs-matter-bdx",
+ "rs-matter-cert",
+ "rs-matter-crypto",
+ "rs-matter-dm",
+ "rs-matter-dm-clusters",
+ "rs-matter-dm-core",
+ "rs-matter-im",
+ "rs-matter-im-core",
+ "rs-matter-node",
+ "rs-matter-node-core",
+ "rs-matter-onboard",
+ "rs-matter-pairing",
+ "rs-matter-respond",
+ "rs-matter-sc",
+ "rs-matter-stack",
+ "rs-matter-tlv",
+ "rs-matter-transport",
+ "rs-matter-utils",
+ "strum 0.28.0",
+]
+
+[[package]]
+name = "rs-matter-bdx"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "defmt",
+ "log",
  "num",
  "num-derive 0.5.1",
  "num-traits",
- "num_enum",
- "pinned-init",
- "qrcodegen-no-heap",
- "rand 0.10.3",
- "rand_core 0.10.1",
- "rs-matter-codegen",
- "rs-matter-macros",
- "scopeguard",
- "strum 0.28.0",
- "subtle",
+ "rs-matter-transport",
+ "rs-matter-utils",
+]
+
+[[package]]
+name = "rs-matter-cert"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "defmt",
+ "der",
+ "log",
+ "num",
+ "num-derive 0.5.1",
+ "num-traits",
+ "rs-matter-crypto",
+ "rs-matter-tlv",
+ "rs-matter-utils",
  "time",
- "verhoeff",
 ]
 
 [[package]]
 name = "rs-matter-codegen"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=846073fc78e4bf540203e33c7638dd4751381dca#846073fc78e4bf540203e33c7638dd4751381dca"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
 dependencies = [
  "convert_case 0.6.0",
  "miette",
@@ -3709,34 +3746,110 @@ dependencies = [
 ]
 
 [[package]]
+name = "rs-matter-crypto"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "defmt",
+ "der",
+ "log",
+ "mbedtls-rs-sys",
+ "rand 0.10.3",
+ "rand_core 0.10.1",
+ "rs-matter-tlv",
+ "rs-matter-utils",
+]
+
+[[package]]
+name = "rs-matter-dm"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "bitflags 2.13.2",
+ "defmt",
+ "either",
+ "heapless 0.9.3",
+ "if-addrs",
+ "log",
+ "nix 0.31.3",
+ "num",
+ "rand_core 0.10.1",
+ "rs-matter-bdx",
+ "rs-matter-cert",
+ "rs-matter-crypto",
+ "rs-matter-dm-clusters",
+ "rs-matter-dm-core",
+ "rs-matter-im-core",
+ "rs-matter-node",
+ "rs-matter-node-core",
+ "rs-matter-sc",
+ "rs-matter-tlv",
+ "rs-matter-transport",
+ "rs-matter-utils",
+ "scopeguard",
+]
+
+[[package]]
+name = "rs-matter-dm-clusters"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "bitflags 2.13.2",
+ "defmt",
+ "rs-matter-codegen",
+ "rs-matter-dm-core",
+ "rs-matter-im-core",
+ "rs-matter-tlv",
+ "rs-matter-utils",
+ "strum 0.28.0",
+]
+
+[[package]]
+name = "rs-matter-dm-core"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "cfg-if",
+ "defmt",
+ "either",
+ "log",
+ "rand_core 0.10.1",
+ "rs-matter-crypto",
+ "rs-matter-im-core",
+ "rs-matter-tlv",
+ "rs-matter-utils",
+ "strum 0.28.0",
+]
+
+[[package]]
 name = "rs-matter-embassy"
 version = "0.1.0"
-source = "git+https://github.com/sysgrok/rs-matter-embassy?rev=de748942efc18afbfd49ad350945f2eeea99f8a1#de748942efc18afbfd49ad350945f2eeea99f8a1"
+source = "git+https://github.com/sysgrok/rs-matter-embassy?rev=165534170a48e86a96a659ba9e5162be1ce0e927#165534170a48e86a96a659ba9e5162be1ce0e927"
 dependencies = [
  "bt-hci 0.10.1",
  "cfg-if",
  "cyw43",
+ "edge-nal",
  "edge-nal-embassy",
  "edge-nal-openthread",
- "embassy-futures",
  "embassy-net",
  "embassy-nrf",
  "embassy-sync 0.8.0",
- "embassy-time",
  "embedded-io 0.7.1",
  "embedded-storage-async",
  "enumset",
  "esp-hal",
  "esp-radio",
- "heapless 0.9.3",
  "log",
  "nimble-rs",
  "nrf-802154",
  "nrf-mpsl",
  "nrf-sdc",
  "openthread",
+ "rand_chacha",
+ "rand_core 0.10.1",
  "rand_core 0.9.5",
- "rs-matter-stack",
+ "rs-matter",
  "scopeguard",
  "sequential-storage",
  "static_cell",
@@ -3744,9 +3857,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "rs-matter-im"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "defmt",
+ "log",
+ "rs-matter-crypto",
+ "rs-matter-dm-core",
+ "rs-matter-im-core",
+ "rs-matter-node",
+ "rs-matter-node-core",
+ "rs-matter-sc",
+ "rs-matter-tlv",
+ "rs-matter-utils",
+]
+
+[[package]]
+name = "rs-matter-im-core"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "defmt",
+ "log",
+ "num",
+ "num-derive 0.5.1",
+ "num-traits",
+ "num_enum",
+ "rs-matter-tlv",
+ "rs-matter-utils",
+]
+
+[[package]]
 name = "rs-matter-macros"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=846073fc78e4bf540203e33c7638dd4751381dca#846073fc78e4bf540203e33c7638dd4751381dca"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3755,25 +3900,197 @@ dependencies = [
 ]
 
 [[package]]
-name = "rs-matter-stack"
-version = "0.3.1"
-source = "git+https://github.com/sysgrok/rs-matter-stack?rev=8937475a1f808fd17d7cd5c949ee0f0a5e9d3074#8937475a1f808fd17d7cd5c949ee0f0a5e9d3074"
+name = "rs-matter-node"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "defmt",
+ "log",
+ "rand_core 0.10.1",
+ "rs-matter-cert",
+ "rs-matter-crypto",
+ "rs-matter-dm-core",
+ "rs-matter-im-core",
+ "rs-matter-node-core",
+ "rs-matter-pairing",
+ "rs-matter-sc",
+ "rs-matter-tlv",
+ "rs-matter-transport",
+ "rs-matter-utils",
+]
+
+[[package]]
+name = "rs-matter-node-core"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
 dependencies = [
  "bitflags 2.13.2",
  "cfg-if",
- "edge-mdns",
- "edge-nal",
+ "defmt",
+ "log",
+ "num",
+ "num-derive 0.5.1",
+ "num-traits",
+ "rs-matter-cert",
+ "rs-matter-crypto",
+ "rs-matter-dm-core",
+ "rs-matter-im-core",
+ "rs-matter-pairing",
+ "rs-matter-tlv",
+ "rs-matter-utils",
+]
+
+[[package]]
+name = "rs-matter-onboard"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "defmt",
+ "log",
+ "rs-matter-cert",
+ "rs-matter-crypto",
+ "rs-matter-dm-clusters",
+ "rs-matter-dm-core",
+ "rs-matter-im-core",
+ "rs-matter-node",
+ "rs-matter-sc",
+ "rs-matter-tlv",
+ "rs-matter-utils",
+]
+
+[[package]]
+name = "rs-matter-pairing"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "defmt",
+ "log",
+ "qrcodegen-no-heap",
+ "rs-matter-crypto",
+ "rs-matter-tlv",
+ "rs-matter-utils",
+ "verhoeff",
+]
+
+[[package]]
+name = "rs-matter-respond"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "defmt",
+ "log",
+ "rs-matter-bdx",
+ "rs-matter-crypto",
+ "rs-matter-dm-core",
+ "rs-matter-im",
+ "rs-matter-node",
+ "rs-matter-sc",
+ "rs-matter-utils",
+]
+
+[[package]]
+name = "rs-matter-sc"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "defmt",
+ "log",
+ "num",
+ "rand_core 0.10.1",
+ "rs-matter-cert",
+ "rs-matter-crypto",
+ "rs-matter-dm-core",
+ "rs-matter-node-core",
+ "rs-matter-pairing",
+ "rs-matter-tlv",
+ "rs-matter-transport",
+ "rs-matter-utils",
+ "subtle",
+]
+
+[[package]]
+name = "rs-matter-stack"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "async-io",
+ "cfg-if",
+ "defmt",
+ "log",
+ "rs-matter-crypto",
+ "rs-matter-dm",
+ "rs-matter-dm-core",
+ "rs-matter-im",
+ "rs-matter-node",
+ "rs-matter-pairing",
+ "rs-matter-respond",
+ "rs-matter-sc",
+ "rs-matter-tlv",
+ "rs-matter-transport",
+ "rs-matter-utils",
+ "scopeguard",
+ "socket2",
+]
+
+[[package]]
+name = "rs-matter-tlv"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "defmt",
+ "log",
+ "num",
+ "num-derive 0.5.1",
+ "num-traits",
+ "pinned-init",
+ "rs-matter-macros",
+ "rs-matter-utils",
+]
+
+[[package]]
+name = "rs-matter-transport"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "async-channel",
+ "async-io",
+ "bitflags 2.13.2",
+ "cfg-if",
+ "defmt",
+ "domain",
+ "either",
+ "log",
+ "nix 0.31.3",
+ "num",
+ "num-derive 0.5.1",
+ "num-traits",
+ "rand_core 0.10.1",
+ "rs-matter-crypto",
+ "rs-matter-dm-core",
+ "rs-matter-im-core",
+ "rs-matter-node-core",
+ "rs-matter-pairing",
+ "rs-matter-tlv",
+ "rs-matter-utils",
+ "windows",
+]
+
+[[package]]
+name = "rs-matter-utils"
+version = "0.4.1"
+source = "git+https://github.com/project-chip/rs-matter?rev=9e14c7c269d05c6b6134c75fe56ce7852576846c#9e14c7c269d05c6b6134c75fe56ce7852576846c"
+dependencies = [
+ "bitflags 2.13.2",
+ "critical-section",
+ "defmt",
  "embassy-futures",
  "embassy-sync 0.8.0",
  "embassy-time",
- "enumset",
+ "embedded-io-async 0.7.0",
  "heapless 0.9.3",
  "log",
- "rand_chacha",
- "rand_core 0.10.1",
- "rand_core 0.9.5",
- "rs-matter",
- "scopeguard",
+ "num_enum",
+ "pinned-init",
 ]
 
 [[package]]
@@ -4025,6 +4342,16 @@ dependencies = [
  "cfg-if",
  "heapless 0.9.3",
  "managed",
+]
+
+[[package]]
+name = "socket2"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4751,6 +5078,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows"
+version = "0.62.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
+dependencies = [
+ "windows-collections",
+ "windows-core",
+ "windows-future",
+ "windows-numerics",
+]
+
+[[package]]
+name = "windows-collections"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b2d95af1a8a14a3c7367e1ed4fc9c20e0a26e79551b1454d72583c97cc6610"
+dependencies = [
+ "windows-core",
+]
+
+[[package]]
 name = "windows-core"
 version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4761,6 +5109,17 @@ dependencies = [
  "windows-link",
  "windows-result",
  "windows-strings",
+]
+
+[[package]]
+name = "windows-future"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1d6f90251fe18a279739e78025bd6ddc52a7e22f921070ccdc67dde84c605cb"
+dependencies = [
+ "windows-core",
+ "windows-link",
+ "windows-threading",
 ]
 
 [[package]]
@@ -4790,6 +5149,16 @@ name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+
+[[package]]
+name = "windows-numerics"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e2e40844ac143cdb44aead537bbf727de9b044e107a0f1220392177d15b0f26"
+dependencies = [
+ "windows-core",
+ "windows-link",
+]
 
 [[package]]
 name = "windows-result"
@@ -4850,6 +5219,15 @@ dependencies = [
  "windows_x86_64_gnu",
  "windows_x86_64_gnullvm",
  "windows_x86_64_msvc",
+]
+
+[[package]]
+name = "windows-threading"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3949bd5b99cafdf1c7ca86b43ca564028dfe27d66958f2470940f73d86d75b37"
+dependencies = [
+ "windows-link",
 ]
 
 [[package]]
