@@ -93,7 +93,6 @@ fn the_battery_estimate_needs_nothing_from_earlier_boots() {
     let last = estimates.last().expect("an estimate per boot");
     assert_eq!(world.boots()[0].wake, WakeCause::Cold);
     assert_eq!(first.reading, last.reading);
-    assert!(first.reading.and_then(|r| r.time_remaining_s).is_some());
 }
 
 #[test]
@@ -110,26 +109,6 @@ fn an_empty_holder_reports_the_battery_as_unknown() {
         readings,
         vec![None],
         "a board on USB has no cell to estimate"
-    );
-}
-
-#[test]
-fn the_time_remaining_is_more_pessimistic_than_the_energy_model() {
-    let mut world = World::new().battery(Script::constant(1550));
-    world.run_until(3 * DAY);
-
-    let energy = Energy::from_world(&world);
-    let modelled_s = energy.life_years(soil_sensor_sim::energy::AA_CAPACITY_MAH) * 365.0 * 86_400.0;
-    let estimated_s = world
-        .battery_estimates()
-        .last()
-        .and_then(|estimate| estimate.reading)
-        .and_then(|reading| reading.time_remaining_s)
-        .expect("every estimate has a time remaining");
-
-    assert!(
-        f64::from(estimated_s) < modelled_s,
-        "the estimate ({estimated_s} s) must not promise more than the energy model ({modelled_s:.0} s)"
     );
 }
 

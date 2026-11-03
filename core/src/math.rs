@@ -59,16 +59,6 @@ pub fn should_report(last_reported: Option<u32>, current: u32, min_delta: u32) -
     }
 }
 
-/// How long `permille` of a cell of `capacity_mah` lasts at an average draw
-/// of `average_ua`, in seconds.
-pub fn battery_time_remaining_s(permille: u32, capacity_mah: u32, average_ua: u32) -> u32 {
-    // 1 mAh is 3,600,000,000 nC, and nC / uA is milliseconds. `u128`, because
-    // no product of these inputs can leave it.
-    let left_nc = u128::from(capacity_mah) * 3_600_000_000 * u128::from(permille) / 1000;
-    let ms = left_nc / u128::from(average_ua.max(1));
-    (ms / 1000).min(u128::from(u32::MAX)) as u32
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,68 +201,6 @@ mod tests {
         } in test_cases
         {
             let result = battery_permille(input_mv, input_curve);
-            assert_eq!(result, expected, "Failed case: '{name}'");
-        }
-    }
-
-    struct TimeRemainingTestCase {
-        name: &'static str,
-        input_permille: u32,
-        input_capacity_mah: u32,
-        input_average_ua: u32,
-        expected: u32,
-    }
-
-    #[test]
-    fn test_battery_time_remaining_s() {
-        let test_cases = vec![
-            TimeRemainingTestCase {
-                name: "a full cell lasts its capacity over the current",
-                input_permille: 1000,
-                input_capacity_mah: 2000,
-                input_average_ua: 1000,
-                expected: 2000 * 3600,
-            },
-            TimeRemainingTestCase {
-                name: "a cell at a tenth lasts a tenth as long",
-                input_permille: 100,
-                input_capacity_mah: 2000,
-                input_average_ua: 1000,
-                expected: 200 * 3600,
-            },
-            TimeRemainingTestCase {
-                name: "an empty cell lasts nothing",
-                input_permille: 0,
-                input_capacity_mah: 2000,
-                input_average_ua: 1000,
-                expected: 0,
-            },
-            TimeRemainingTestCase {
-                name: "no current does not divide by zero",
-                input_permille: 1000,
-                input_capacity_mah: 1,
-                input_average_ua: 0,
-                expected: 3_600_000,
-            },
-            TimeRemainingTestCase {
-                name: "a time past the attribute's range clamps",
-                input_permille: u32::MAX,
-                input_capacity_mah: u32::MAX,
-                input_average_ua: 1,
-                expected: u32::MAX,
-            },
-        ];
-
-        for TimeRemainingTestCase {
-            name,
-            input_permille,
-            input_capacity_mah,
-            input_average_ua,
-            expected,
-        } in test_cases
-        {
-            let result =
-                battery_time_remaining_s(input_permille, input_capacity_mah, input_average_ua);
             assert_eq!(result, expected, "Failed case: '{name}'");
         }
     }

@@ -1,23 +1,47 @@
 //! What a simulated run costs, in the only terms that matter to a battery.
 //!
-//! The currents are the chip's, from the datasheet, and the duty cycle is what
-//! the simulation actually did. The result is therefore a model: it says what
-//! the *decisions* cost, and nothing about the board around the chip.
+//! The currents are measured on the hardware (a multimeter in series with
+//! the cell: ~100 mA awake, 0.12 mA asleep), and the duty cycle is what the
+//! simulation actually did - plus the protocol stack's share of a wake, a
+//! model, because the simulation does not run the stack. The result is
+//! therefore a model twice over: it says what the *decisions* cost, and what
+//! the radio work around them is *assumed* to cost.
+//!
+//! Both currents are battery-side, so the boost converter's overhead is
+//! inside the awake figure.
 
-use soil_sensor_core::tuning;
+/// Measured with a multimeter in series with the cell: ~100 mA while the
+/// device is awake and online. That is the *battery-side* figure - the
+/// carrier's boost converter from the 1.5 V cell draws ~100 mA to deliver
+/// ~38 mA at the 3.3 V rail, where the Thread radio, the BLE commissioning
+/// peripheral and the CPU run concurrently. Far above the datasheet's
+/// "modem-sleep, CPU idle" 17 mA, which is why the awake window - not the
+/// deep sleep - dominates the budget.
+pub const AWAKE_MA: f64 = 100.0;
 
-/// Typical current while the CPU is running with the radio off, in milliamps.
-/// The datasheet's "modem-sleep, CPU idle, 160 MHz, peripheral clocks disabled"
-/// figure; a real board with its regulators and flash sits above it.
-pub const AWAKE_MA: f64 = 17.0;
-
-/// Typical current in deep sleep, in microamps. Only the low-power timer and
-/// memory stay powered.
-pub const ASLEEP_UA: f64 = 7.0;
+/// Measured with a multimeter in series with the cell: 0.12 mA in deep
+/// sleep. The datasheet's figure for the chip alone is 7 uA; the rest is the
+/// carrier board around it (boost converter, charger path, sense divider).
+/// Worth hunting, but at a ~0.4% awake duty it is only ~12% of the average.
+pub const ASLEEP_UA: f64 = 120.0;
 
 /// A representative AA cell, in milliamp-hours. Capacity depends on the drain
 /// rate and the cut-off, so this is a reference figure rather than a guarantee.
 pub const AA_CAPACITY_MAH: f64 = 2500.0;
+
+/// The protocol stack's share of one wake-up, in milliseconds: everything the
+/// simulation cannot see because it does not run the stack - the stack's boot,
+/// the Thread attach, the CASE resumption, the subscription's priming report
+/// and the final persist.
+///
+/// Measured on the hardware, from a debug-logged wake at the current
+/// reachability tuning (150 ms fast poll, 1 s active threshold, 30 min idle):
+/// 7.55 s awake end to end, of which the simulation's own accounting covers
+/// the decision layer's ~2.4 s (the wake-phase measurement and the
+/// active-window bookkeeping), so this is the stack's remaining share. A
+/// calibration or a button wake runs longer; charging every boot the same is
+/// the conservative side of wrong.
+pub const PROTOCOL_AWAKE_MS_PER_BOOT: u64 = 5_150;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Energy {
@@ -28,7 +52,7 @@ pub struct Energy {
 impl Energy {
     pub fn from_world(world: &super::World) -> Self {
         Self {
-            awake_ms: world.awake_ms(),
+            awake_ms: world.awake_ms() + PROTOCOL_AWAKE_MS_PER_BOOT * world.boot_count() as u64,
             asleep_ms: world.asleep_ms(),
         }
     }
@@ -82,10 +106,4 @@ impl Energy {
             AA_CAPACITY_MAH,
         )
     }
-}
-
-/// The energy of one wake-up, as the model sees it - useful for sanity checks
-/// against the tuning.
-pub fn awake_ms_per_boot() -> u64 {
-    tuning::ACTIVE_HOLD.as_millis()
 }

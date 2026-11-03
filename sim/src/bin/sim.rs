@@ -67,13 +67,21 @@ fn main() {
         world.battery_reports().len(),
         world.reboot_count_writes(),
     );
+    let sim_awake_ms = if world.boot_count() == 0 {
+        0
+    } else {
+        world.awake_ms() / world.boot_count() as u64
+    };
     println!(
-        "{} ms awake per boot on average",
+        "{} ms awake per boot on average ({} ms measured by the simulation, \
+         {} ms assumed for the protocol stack)",
         if world.boot_count() == 0 {
             0
         } else {
-            world.awake_ms() / world.boot_count() as u64
+            energy.awake_ms / world.boot_count() as u64
         },
+        sim_awake_ms,
+        soil_sensor_sim::energy::PROTOCOL_AWAKE_MS_PER_BOOT,
     );
     match world
         .battery_estimates()
@@ -81,14 +89,7 @@ fn main() {
         .map(|estimate| estimate.reading)
     {
         Some(Some(reading)) => {
-            let remaining = match reading.time_remaining_s {
-                Some(s) => format!("{:.0} days", f64::from(s) / 86_400.0),
-                None => "unknown".to_string(),
-            };
-            println!(
-                "battery estimate: {}% left, {remaining} remaining",
-                reading.percent
-            );
+            println!("battery estimate: {}% left", reading.percent);
         }
         Some(None) => println!("battery estimate: unknown, no cell"),
         None => {}

@@ -46,34 +46,24 @@ The value is rounded down to whole percent.
 A reading below `tuning::BATTERY_PRESENT_MIN_MV` cannot come from an AA cell.
 Even an exhausted one rests well above it. It is what the pin reads when the
 holder is empty and the board runs from USB. The device then reports the
-charge, the voltage and the time remaining as unknown (null), instead of an
-empty cell that asks to be replaced.
+charge and the voltage as unknown (null), instead of an empty cell that asks
+to be replaced.
 
-## The time remaining
+## What the time remaining would be
 
-`BatTimeRemaining` is the charge left, times an assumed capacity, divided by
-an assumed average draw (`soil_sensor_core::battery_time_remaining_s`). Both
-assumptions are pessimistic:
-
-- **Capacity** (`tuning::BATTERY_CAPACITY_MAH`): at the low end of what AA
-  cells hold at this tiny drain.
-- **Average draw** (`tuning::BATTERY_AVERAGE_UA`): one wake-up per idle
-  period, with an awake time, an awake current and a sleep current that are
-  each above the datasheet's figures and above what the simulator's wake-ups
-  take.
-
-So the time remaining is shorter than the life `make sim` models. A simulator
-test checks that it stays shorter. The same margin covers the middle of an
-alkaline cell's life, where the charge reads too high.
+`BatTimeRemaining` is not served: an estimate from the voltage alone has no
+current draw to divide by, so every number would be a fiction built on two
+assumptions (the cell's capacity, the board's average draw) that nothing on
+the board can measure. The controller that wants a lifetime gets the charge
+and the voltage - both real measurements - and the [`energy model of the
+simulator`](testing.md) is the honest place to ask "how long does this
+firmware last on a cell".
 
 ## What it does not know
 
-- **The real draw and the real capacity.** Both are assumptions. Nothing on
-  the board measures either.
 - **How fast the cell is really draining.** One reading has no rate. A board
-  that draws far more than assumed - like a radio receiver that never turns
-  off - shows only as a falling charge, and the time remaining falls with it.
+  that draws far more than it should - like a radio receiver that never turns
+  off - shows only as a falling charge.
 - **Short-idle operation.** A device that no controller has registered for
-  check-ins never sleeps and draws far more than the assumed average. For it
-  the time remaining is far too long.
+  check-ins never sleeps and drains far faster than a long-idle one.
 - **A lithium cell's last days.** Its voltage stays high until the end.

@@ -24,7 +24,7 @@ use log::{info, warn};
 use crate::button::{ButtonEvent, ButtonFsm};
 use crate::calibration::{self, CalibrationOutcome};
 use crate::led::LedCommand;
-use crate::math::{battery_permille, battery_time_remaining_s, soil_moisture_percent};
+use crate::math::{battery_permille, soil_moisture_percent};
 use crate::ports::{
     BatteryReading, Event, IcdState, MatterPorts, OperatingMode, Outcome, Ports, PowerMode,
     WakeCause,
@@ -352,17 +352,11 @@ fn estimate_battery(rest_mv: u32) -> Option<BatteryReading> {
     }
 
     let permille = battery_permille(rest_mv as i32, &tuning::BATTERY_CURVE);
-    let time_remaining_s = battery_time_remaining_s(
-        permille,
-        tuning::BATTERY_CAPACITY_MAH,
-        tuning::BATTERY_AVERAGE_UA,
-    );
 
     // Rounded down, so the reported charge is never more than the curve's.
     Some(BatteryReading {
         percent: (permille / 10) as u8,
         rest_mv,
-        time_remaining_s: Some(time_remaining_s),
     })
 }
 
@@ -668,7 +662,6 @@ mod tests {
                 expected: Some(BatteryReading {
                     percent: 0,
                     rest_mv: tuning::BATTERY_PRESENT_MIN_MV,
-                    time_remaining_s: Some(0),
                 }),
             },
         ];

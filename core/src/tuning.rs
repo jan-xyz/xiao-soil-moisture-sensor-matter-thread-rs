@@ -99,32 +99,6 @@ pub const BATTERY_CURVE: [(i32, u32); 6] = [
 /// the charge is reported as unknown rather than as an empty cell.
 pub const BATTERY_PRESENT_MIN_MV: u32 = 800;
 
-/// The time remaining is the charge left over an assumed average draw, both
-/// picked on the pessimistic side. Nothing is learned or kept between boots.
-///
-/// The capacity is on the low side: alkaline and NiMH AA cells hold
-/// 2,000-2,800 mAh at this tiny drain, a lithium cell about 3,000 mAh.
-pub const BATTERY_CAPACITY_MAH: u32 = 2_000;
-
-/// The draw is on the high side: one wake-up per idle period, awake for
-/// [`BATTERY_AWAKE_PER_WAKE`] at [`BATTERY_AWAKE_UA`], asleep for the rest at
-/// [`BATTERY_ASLEEP_UA`]. The datasheet puts an idle CPU with the radio off at
-/// 17 mA and deep sleep at 7 uA. The radio, the regulator and the rest of the
-/// board come on top, and this board's real figures are not measured. The
-/// awake time is above what the simulator's wake-ups take.
-pub const BATTERY_AWAKE_UA: u32 = 25_000;
-pub const BATTERY_ASLEEP_UA: u32 = 20;
-pub const BATTERY_AWAKE_PER_WAKE: Millis = Millis::from_secs(5);
-
-/// A short-idle device never sleeps and draws far more, so for one the time
-/// remaining is far too long.
-pub const BATTERY_AVERAGE_UA: u32 = {
-    let awake_ms = BATTERY_AWAKE_PER_WAKE.as_millis();
-    let asleep_ms = LIT_POLL_PERIOD_MS as u64;
-    ((BATTERY_AWAKE_UA as u64 * awake_ms + BATTERY_ASLEEP_UA as u64 * asleep_ms)
-        / (awake_ms + asleep_ms)) as u32
-};
-
 /// How far the resting voltage must move before it is worth a report.
 pub const BATTERY_REPORT_DELTA_MV: i32 = 20;
 
@@ -166,8 +140,12 @@ pub const SIT_POLL_PERIOD_MS: u32 = 15_000;
 
 /// The idle period of Long Idle Time operation, in milliseconds. This is both
 /// the advertised idle interval and the length of a deep sleep, because a
-/// device that sleeps does not poll.
-pub const LIT_POLL_PERIOD_MS: u32 = 900_000;
+/// device that sleeps does not poll. Subscriptions pick their max interval
+/// from it, and reporting is delta-gated anyway, so stretching it halves the
+/// wake count for the same data. Well inside the cluster's 18 h ceiling; the
+/// advertised interval is what a peer waits for an idle us, and one hour is
+/// the spec's cap on that - 30 minutes keeps a margin under it.
+pub const LIT_POLL_PERIOD_MS: u32 = 1_800_000;
 
 /// The same, in whole seconds, as the protocol's idle-mode duration.
 pub const LIT_IDLE_MODE_DURATION_SECS: u32 = LIT_POLL_PERIOD_MS / 1_000;
@@ -176,25 +154,36 @@ pub const LIT_IDLE_MODE_DURATION_SECS: u32 = LIT_POLL_PERIOD_MS / 1_000;
 /// active interval. Short, because the active window is short: the device has
 /// to catch a peer's reply before it sleeps again, and the radio time this
 /// costs is nothing next to being awake at all. It is also the granularity of
-/// the check-in exchange: every round trip of it waits up to one poll period,
-/// and a slow poll here stretches the boot's awake time directly.
-pub const ACTIVE_POLL_PERIOD_MS: u32 = 300;
+/// every exchange: each round trip waits up to one poll period for the
+/// parent to deliver the peer's reply, so halving the poll halves the average
+/// wait of every chunk of a report - and while the device is awake either
+/// way, the extra polls cost nothing.
+pub const ACTIVE_POLL_PERIOD_MS: u32 = 150;
 
 /// How long a boot stays active before it is allowed to go idle. Every
 /// received message extends the window by [`ACTIVE_THRESHOLD_MS`] on its
-/// own, and that threshold sits at the spec's LIT floor of 5 s: the tail
-/// after the last exchange is fixed by the spec either way. The hold itself
-/// is only the controller-latency insurance: the check-in exchange keeps the
-/// window alive, and the observed controller connects within a couple of
-/// seconds of the device becoming reachable - with one observed outlier at
-/// ~14 s, which costs that cycle's subscription and recovers on the next
-/// wake-up's check-in.
-pub const ACTIVE_HOLD: Millis = Millis::from_millis(2_000);
+/// own. The hold sits at the cluster's own floor of 1 s: the
+/// controller-latency insurance it used to be is nearly free anyway, as the
+/// check-in exchange keeps the window alive, and a controller too slow to
+/// answer within it costs only one cycle's subscription, recovered on the
+/// next wake-up's check-in.
+pub const ACTIVE_HOLD: Millis = Millis::from_millis(1_000);
 
-/// How much extra active time every protocol message buys. The protocol's
-/// minimum for a long-idle device, and what keeps the device up while a peer is
-/// mid-exchange with it.
-pub const ACTIVE_THRESHOLD_MS: u16 = 5_000;
+/// How much extra active time every protocol message buys, and what keeps
+/// the device up while a peer is mid-exchange with it.
+///
+/// **Below the spec's floor on purpose, as an experiment.** A LIT ICD is
+/// required to advertise at least 5 s here (Matter Core spec 9.15.1.6.2,
+/// TC-ICDM-2.1), which fixes the tail after the last exchange at 5 s - the
+/// single largest slice of a wake's awake time. This says 1 s instead, to
+/// measure what the tail really costs and whether Home Assistant copes with
+/// a device that goes idle a second after its last answer. What a peer sees:
+/// the `SAT` we advertise (session parameters and DNS-SD) shrinks to 1 s, so
+/// a controller that only starts talking 1-5 s after our last message now
+/// finds us idle and waits for our next wake instead. A conformant build
+/// restores 5_000 - the attribute is fixed-quality, so this is a
+/// re-commissioning, not a runtime write.
+pub const ACTIVE_THRESHOLD_MS: u16 = 1_000;
 
 /// How long the protocol stack waits after a change to the CASE resumption
 /// records before it writes them, so that a burst of handshakes costs one
@@ -202,7 +191,7 @@ pub const ACTIVE_THRESHOLD_MS: u16 = 5_000;
 /// and the boot then waits [`SLEEP_SETTLE`] before it sleeps. A wait shorter
 /// than the threshold therefore always ends before the deep sleep, and the
 /// last change of a boot still reaches flash.
-pub const RESUMPTION_PERSIST_DEBOUNCE: Millis = Millis::from_millis(1_000);
+pub const RESUMPTION_PERSIST_DEBOUNCE: Millis = Millis::from_millis(500);
 
 const _: () = assert!(RESUMPTION_PERSIST_DEBOUNCE.as_millis() < ACTIVE_THRESHOLD_MS as u64);
 

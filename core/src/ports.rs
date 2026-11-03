@@ -22,7 +22,6 @@ use crate::tuning;
 pub struct BatteryReading {
     pub percent: u8,
     pub rest_mv: u32,
-    pub time_remaining_s: Option<u32>,
 }
 
 /// Which way the button just moved.

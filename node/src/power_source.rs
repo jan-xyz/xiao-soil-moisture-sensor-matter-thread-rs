@@ -12,11 +12,11 @@
 //! `BatChargeLevel`, `BatReplacementNeeded` and `BatReplaceability`
 //! mandatory (confirmed against `connectedhomeip`'s
 //! `data_model/1.5/clusters/PowerSourceCluster.xml`). `BatPercentRemaining`
-//! and `BatVoltage` stay optional under `BATTERY` alone, but this is the
+//! and `BatVoltage` stay optional under `BATTERY` alone, but they are the
 //! whole reason to host the cluster, so they're claimed too. `BatTimeRemaining`
-//! is an estimate from the voltage alone
-//! ([`soil_sensor_core::battery_time_remaining_s`]); the board has no current
-//! sensor.
+//! is *not* claimed: an estimate from the voltage alone has no current draw to
+//! divide by, and the attribute would only add report weight (and a fiction)
+//! for a controller that cannot act on it anyway.
 
 use core::cell::RefCell;
 
@@ -42,7 +42,6 @@ pub const CLUSTER: Cluster<'static> = FULL_CLUSTER
         | AttributeId::BatReplaceability
         | AttributeId::BatPercentRemaining
         | AttributeId::BatVoltage
-        | AttributeId::BatTimeRemaining
     ))
     .with_cmds(with!());
 
@@ -54,7 +53,6 @@ const CHARGE_LEVEL_CRITICAL_BELOW_PERCENT: u8 = 5;
 struct Reading {
     percent: Option<u8>,
     rest_mv: Option<u32>,
-    time_remaining_s: Option<u32>,
 }
 
 /// The last-reported battery reading, or `None`s if never reported. Shared
@@ -66,7 +64,6 @@ impl BatteryCell {
         Self(Mutex::new(RefCell::new(Reading {
             percent: None,
             rest_mv: None,
-            time_remaining_s: None,
         })))
     }
 
@@ -76,7 +73,6 @@ impl BatteryCell {
             Reading {
                 percent: reading.percent,
                 rest_mv: reading.rest_mv,
-                time_remaining_s: reading.time_remaining_s,
             }
         })
     }
@@ -86,7 +82,6 @@ impl BatteryCell {
             *cell.borrow_mut() = Reading {
                 percent: reading.map(|reading| reading.percent),
                 rest_mv: reading.map(|reading| reading.rest_mv),
-                time_remaining_s: reading.and_then(|reading| reading.time_remaining_s),
             }
         });
     }
@@ -120,23 +115,20 @@ impl<'a> PowerSourceHandler<'a> {
     }
 
     /// Called by the sampling loop with a freshly measured resting voltage,
-    /// the derived percent and the estimated time remaining, or `None` when
-    /// there is no cell. Only reports (stores the reading, bumps the dataver
-    /// and wakes `run()` to push a subscription update) when the voltage moved
-    /// by at least `BATTERY_REPORT_DELTA_MV` since the last report, or when an
-    /// estimate or the cell becomes available or unavailable, so ADC jitter
-    /// does not wake the Thread radio but a slow discharge still reaches the
-    /// controller.
+    /// the derived percent, or `None` when there is no cell. Only reports
+    /// (stores the reading, bumps the dataver and wakes `run()` to push a
+    /// subscription update) when the voltage moved by at least
+    /// `BATTERY_REPORT_DELTA_MV` since the last report, or when the cell
+    /// becomes available or unavailable, so ADC jitter does not wake the
+    /// Thread radio but a slow discharge still reaches the controller.
     pub fn report(&self, reading: Option<BatteryReading>) {
         let reported = self.reading.get();
         let should_report = match reading {
-            Some(reading) => {
-                soil_sensor_core::should_report(
-                    reported.rest_mv,
-                    reading.rest_mv,
-                    BATTERY_REPORT_DELTA_MV as u32,
-                ) || reported.time_remaining_s.is_some() != reading.time_remaining_s.is_some()
-            }
+            Some(reading) => soil_sensor_core::should_report(
+                reported.rest_mv,
+                reading.rest_mv,
+                BATTERY_REPORT_DELTA_MV as u32,
+            ),
             None => reported.rest_mv.is_some(),
         };
 
@@ -145,13 +137,9 @@ impl<'a> PowerSourceHandler<'a> {
         }
 
         match reading {
-            Some(BatteryReading {
-                percent,
-                rest_mv,
-                time_remaining_s,
-            }) => log::info!(
-                "Battery: {percent}% ({rest_mv} mV, time remaining: {time_remaining_s:?} s, reported change: {should_report})"
-            ),
+            Some(BatteryReading { percent, rest_mv }) => {
+                log::info!("Battery: {percent}% ({rest_mv} mV, reported change: {should_report})")
+            }
             None => log::info!("Battery: unknown (reported change: {should_report})"),
         }
 
@@ -185,11 +173,6 @@ impl ClusterHandler for PowerSourceHandler<'_> {
                 self.endpoint_id,
                 Self::CLUSTER.id,
                 AttributeId::BatVoltage as _,
-            );
-            ctx.notify_attr_changed(
-                self.endpoint_id,
-                Self::CLUSTER.id,
-                AttributeId::BatTimeRemaining as _,
             );
         }
     }
@@ -241,13 +224,6 @@ impl ClusterHandler for PowerSourceHandler<'_> {
         })
     }
 
-    fn bat_time_remaining(&self, _ctx: impl ReadContext) -> Result<Nullable<u32>, Error> {
-        Ok(match self.reading.get().time_remaining_s {
-            Some(time_remaining_s) => Nullable::some(time_remaining_s),
-            None => Nullable::none(),
-        })
-    }
-
     fn bat_charge_level(&self, _ctx: impl ReadContext) -> Result<BatChargeLevelEnum, Error> {
         Ok(match self.reading.get().percent {
             Some(percent) if percent < CHARGE_LEVEL_CRITICAL_BELOW_PERCENT => {
@@ -285,12 +261,8 @@ mod tests {
         PowerSourceHandler::new(1, Dataver::new(0), cell)
     }
 
-    fn reading(percent: u8, rest_mv: u32, time_remaining_s: Option<u32>) -> Option<BatteryReading> {
-        Some(BatteryReading {
-            percent,
-            rest_mv,
-            time_remaining_s,
-        })
+    fn reading(percent: u8, rest_mv: u32) -> Option<BatteryReading> {
+        Some(BatteryReading { percent, rest_mv })
     }
 
     #[test]
@@ -298,7 +270,7 @@ mod tests {
         let handler = handler();
         let before = handler.dataver();
 
-        handler.report(reading(80, 1400, None));
+        handler.report(reading(80, 1400));
 
         assert_ne!(handler.dataver(), before);
     }
@@ -306,10 +278,10 @@ mod tests {
     #[test]
     fn voltage_jitter_below_the_deadband_is_not_reported() {
         let handler = handler();
-        handler.report(reading(80, 1400, None));
+        handler.report(reading(80, 1400));
         let reported = handler.dataver();
 
-        handler.report(reading(80, 1410, None));
+        handler.report(reading(80, 1410));
         assert_eq!(
             handler.dataver(),
             reported,
@@ -320,42 +292,24 @@ mod tests {
     #[test]
     fn a_reading_that_moved_enough_is_reported() {
         let handler = handler();
-        handler.report(reading(80, 1400, None));
+        handler.report(reading(80, 1400));
         let reported = handler.dataver();
 
-        handler.report(reading(79, 1380, None));
+        handler.report(reading(79, 1380));
         assert_ne!(handler.dataver(), reported);
-    }
-
-    #[test]
-    fn an_estimate_appearing_on_its_own_is_reported() {
-        let handler = handler();
-        handler.report(reading(80, 1400, None));
-        let reported = handler.dataver();
-
-        handler.report(reading(80, 1400, Some(3_600)));
-        assert_ne!(
-            handler.dataver(),
-            reported,
-            "a new time-remaining estimate is news even when the voltage has not moved"
-        );
     }
 
     #[test]
     fn a_cell_taken_out_is_reported_as_unknown() {
         let handler = handler();
-        handler.report(reading(80, 1400, Some(3_600)));
+        handler.report(reading(80, 1400));
         let reported = handler.dataver();
 
         handler.report(None);
         assert_ne!(handler.dataver(), reported);
         assert_eq!(
-            (
-                handler.reading.get().percent,
-                handler.reading.get().rest_mv,
-                handler.reading.get().time_remaining_s
-            ),
-            (None, None, None)
+            (handler.reading.get().percent, handler.reading.get().rest_mv),
+            (None, None)
         );
     }
 
