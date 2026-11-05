@@ -20,6 +20,43 @@ one has a reason, and each one has already cost somebody an afternoon.
 | 20 | Red LED |
 | 21 | Soil probe excitation PWM |
 
+## The power path
+
+A single AA cell in the 14500-sized holder feeds a TPS61021A boost converter,
+which makes the 3V3 rail (feedback divider R12/R15). Three things about it that
+the firmware cannot change:
+
+- **The converter has no firmware authority.** Its EN pin is driven by Q4 from
+  VDD_5V: USB present disables the battery boost, and the board runs from USB.
+  Deep sleep, factory reset, whatever - the converter keeps the 3V3 rail up for
+  as long as the cell is in.
+- **Deep sleep is carrier-bound at ~0.12 mA** (measured, multimeter in series
+  with the cell). The chip's own share is the datasheet's ~7 µA; the rest is
+  the boost's light-load operation and what hangs off 3V3. That is 6-17x the
+  chip datasheet, but at the 30-minute wake cadence it is only ~20% of the
+  average draw - real, and not the first lever.
+- **The awake current is ~100 mA at the cell**, because the boost multiplies:
+  ~38 mA at 3.3 V (Thread radio, CPU, everything) comes out of a 1.3-1.4 V
+  cell as ~100 mA through the conversion. A millisecond shaved off the awake
+  window is worth ~25x a millisecond of deep sleep. And there is nothing to
+  underclock: the CPU already runs at esp-hal's default 80 MHz, the lowest
+  clock preset the C6 exposes - the 100 mA is radio and boost physics, not
+  CPU speed.
+
+## The battery reading is a loaded reading
+
+The cell voltage reaches GPIO0 through R16 (100K) into C6 (100 nF) - a sample
+cap, not a divider, so the path draws no standing current while the chip
+sleeps. The price: C6 recharges through the 100K in ~10 ms, which is far
+shorter than a wake - so as soon as the board is awake and pulling tens to a
+hundred milliamps, the cap reports the *sagged* rail, not the cell's
+open-circuit voltage. Expect the reported voltage to sit tens of millivolts
+below the true resting voltage for as long as the board is awake - more with
+the radio online than in the wake phase, where the sampling happens before the
+radios come up. The trend across days therefore mixes true drain with the
+wake-load sag, and a multimeter in series with the cell is the better
+instrument for answering "how much is really being drawn".
+
 ## The radio's random number generator and the sensors share one ADC
 
 `esp-hal`'s `TrngSource` supplements the hardware RNG with ADC noise, which means

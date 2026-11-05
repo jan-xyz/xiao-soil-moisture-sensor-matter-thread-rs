@@ -61,9 +61,9 @@ deliberately does not match every feature of the C++ original. See
   The numbers are in `core/src/tuning.rs`.
 - **MCU deep sleep while operating as a LIT**: once the
   device is idle and has taken its reading, the CPU, RAM and every APB-clocked
-  peripheral are powered off until the next wake-up is due. The datasheet puts
-  deep sleep at ~7 uA against ~17 mA for an idle CPU, so this is the difference
-  between days and years on a cell - see [Power](#power).
+  peripheral are powered off until the next wake-up is due. Measured on the
+  board: ~0.12 mA asleep against ~100 mA awake, so the seconds-long wake -
+  not the sleep - is the whole battery story - see [Power](#power).
 - LIT ICD: hosts the Matter ICD Management cluster on endpoint 0 through
   `rs-matter`'s `LitIcdMgmtHandler`/`LitIcd`, which sends the Check-In sweep to
   registered clients whose subscription has lapsed, honors `StayActiveRequest`
@@ -95,13 +95,21 @@ The device is a Long Idle Time ICD, and it deep-sleeps between wake-ups. While n
 controller has registered for Check-Ins it operates as a Short Idle Time device
 instead and **never sleeps**, because it has to stay reachable within seconds.
 
-The budget is dominated by the window it must stay awake after each wake-up -
-long enough to attach to Thread, announce itself and take a reading. `make sim`
-turns that into a battery life, and that number is a *model*, not a
-measurement.
+The budget is dominated by the seconds it must stay awake after each wake-up -
+long enough to attach to Thread, announce itself and take a reading. Measured
+on the board: ~100 mA at the cell while awake (the Thread radio, the CPU, and
+the boost converter that makes 3.3 V out of the 1.5 V cell), ~0.12 mA asleep -
+so one wake-up costs about as much as a full day of deep sleep, and the
+wake-up cadence is most of the battery story. At the 30-minute idle that is
+~0.5 mA of average current: months on an AA, not years.
+
+`make sim` turns that into a battery life from the measured currents, plus the
+assumptions it still carries - that number is a *model*, not a measurement.
 
 [`docs/matter.md`](docs/matter.md) has the duty cycle, the table, and what the
-model leaves out.
+model leaves out; [`docs/hardware.md`](docs/hardware.md) has the power path,
+what the carrier board contributes, and why the reported battery voltage reads
+low.
 
 ## Known limitations
 

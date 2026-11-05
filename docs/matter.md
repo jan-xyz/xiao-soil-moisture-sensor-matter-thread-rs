@@ -91,20 +91,34 @@ send its Check-In, let the controller re-subscribe and take its own reading — 
 inside the active window that `tuning::ACTIVE_HOLD` starts and every message
 extends.
 
-That window is worth far more than the sleep it replaces. At one wake-up per
-idle period it dominates everything else:
+That window is worth far more than the sleep it replaces. Measured with a
+multimeter in series with the cell, at the current tuning:
 
-| | Time | Current |
+| | Time | Current (at the cell) |
 |---|---|---|
-| Active window | the boot's awake time | ~17 mA (datasheet: modem-sleep, CPU idle, 160 MHz) |
-| Deep sleep | the rest | ~7 µA (datasheet) |
+| Active window | ~7.6 s of the cycle | ~100 mA |
+| Deep sleep | the rest | ~0.12 mA |
 
-`make sim` turns this into an average current and a battery life, and that
-number is a *model*. It computes it from the datasheet currents and the duty
-cycle the simulation actually produced. It says what the
-decisions cost, not what the board draws: the regulators, the flash and the radio
-wake-up cost are all real and all absent from it. Only a power profiler settles
-it.
+The awake figure is battery-side and carries everything: the Thread radio and
+the CPU, and the carrier's boost converter, which pulls ~100 mA from the 1.5 V
+cell to deliver ~38 mA at 3.3 V. The datasheet's 17 mA "idle CPU" figure
+understates a wake fourfold - the radios run with the CPU, and boosting from
+1.5 V multiplies the cell-side current.
+
+The deep-sleep figure is a carrier-board property, not a chip one: the chip's
+share is the datasheet's ~7 µA, and the boost converter - which the firmware
+cannot gate, see [`hardware.md`](hardware.md) - keeps the 3V3 rail alive
+through the sleep for the rest.
+
+One wake-up per idle period therefore costs ~0.96 mA of average current at the
+15-minute idle and ~0.54 mA at the 30-minute one - months on an AA cell, in the
+same league as the stock Wi-Fi firmware's reported 4-5 months.
+
+`make sim` turns this into an average current and a battery life. Its currents
+are the measured ones, and its per-wake time is the simulation's own accounting
+plus a modelled share for the protocol stack, which the simulation does not
+run. It says what the decisions cost and what the radio work around them is
+assumed to cost. Only a power profiler settles the rest.
 
 ## The ICD Management cluster lives on endpoint 0
 

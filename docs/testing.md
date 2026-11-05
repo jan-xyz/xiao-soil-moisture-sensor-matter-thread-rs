@@ -40,6 +40,14 @@ It prints the time spent awake and asleep, the average current and a
 battery-life model, the counts of boots and reports, the average awake time per
 boot, and the device's last battery estimate.
 
+The currents in the model are measured ones (~100 mA awake at the cell,
+~0.12 mA asleep - see [`hardware.md`](hardware.md)), and the per-boot awake
+time is the simulation's own accounting plus a modelled share for the protocol
+stack, which the simulation does not run (see `sim/src/energy.rs`). When the
+tuning or the board changes, both are due for a re-measurement - the multimeter
+in series with the cell, and the wake log's start-to-deep-sleep span, are the
+instruments.
+
 `--verbose` prints one line per boot, with the wake cause, how long it stayed
 awake, and how it ended. `--sit-for N` makes it operate as a short-idle device for
 N seconds before a controller registers, which is the mode where it never sleeps.
