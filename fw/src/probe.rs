@@ -42,7 +42,7 @@ where
 
         let mut sum = 0u32;
         for _ in 0..SOIL_SAMPLE_COUNT {
-            sum += u32::from(adc.read_oneshot(&mut self.pin).await);
+            sum += u32::from(adc.read_oneshot(&mut self.pin).await.unwrap());
             Timer::after(Duration::from_millis(SOIL_SAMPLE_GAP.as_millis())).await;
         }
 

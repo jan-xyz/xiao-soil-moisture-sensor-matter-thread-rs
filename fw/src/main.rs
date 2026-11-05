@@ -30,6 +30,7 @@ use esp_bootloader_esp_idf::partitions::{
     read_partition_table, DataPartitionSubType, PartitionType, PARTITION_TABLE_MAX_LEN,
 };
 use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcConfig, Attenuation};
+use esp_hal::flash::{Config as FlashConfig, Flash};
 use esp_hal::gpio::{Flex, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::ledc::channel::{self, ChannelIFace};
 use esp_hal::ledc::timer::{self, TimerIFace};
@@ -379,10 +380,14 @@ async fn main(s: Spawner) {
     // channel, matching the board's shared-ADC-unit constraint.
     let mut adc_config = AdcConfig::new();
     let battery_pin = adc_config
-        .enable_pin_with_cal::<_, AdcCalCurve<_>>(peripherals.GPIO0.reborrow(), Attenuation::_11dB);
+        .enable_pin_with_cal::<_, AdcCalCurve<_>>(peripherals.GPIO0.reborrow(), Attenuation::_11dB)
+        .unwrap();
     let soil_pin = adc_config
-        .enable_pin_with_cal::<_, AdcCalCurve<_>>(peripherals.GPIO1.reborrow(), Attenuation::_11dB);
-    let adc = Adc::new(peripherals.ADC1.reborrow(), adc_config).into_async();
+        .enable_pin_with_cal::<_, AdcCalCurve<_>>(peripherals.GPIO1.reborrow(), Attenuation::_11dB)
+        .unwrap();
+    let adc = Adc::new(peripherals.ADC1.reborrow(), adc_config)
+        .unwrap()
+        .into_async();
 
     // Excitation PWM for the soil probe, idle (0% duty) until a measurement is
     // taken. 6-bit duty rather than the original firmware's 8-bit: the divisor
@@ -425,13 +430,21 @@ async fn main(s: Spawner) {
     s.spawn(leds::run(status_leds, LED_CHANNEL.receiver()).unwrap());
 
     // Flash: one physical peripheral, shared between the protocol stack's own
-    // persistence and the calibration store (see `flash.rs`).
-    let mut flash_storage = FlashStorage::new(peripherals.FLASH);
+    // persistence and the calibration store (see `flash.rs`). The partition
+    // table is read through `esp_hal::flash::Flash`, which takes the FLASH
+    // peripheral and has no way to give it back; the storage layer therefore
+    // re-takes a second handle afterwards. The reader is done with the flash
+    // by then and holds no hardware state, so the two never touch it at once.
+    let mut flash = Flash::new(peripherals.FLASH, FlashConfig::default()).unwrap();
     let mut pt_buf = [0u8; PARTITION_TABLE_MAX_LEN];
-    let pt = read_partition_table(&mut flash_storage, &mut pt_buf).unwrap();
+    let pt = read_partition_table(&mut flash, &mut pt_buf).unwrap();
 
     let flash_bus: &'static SharedFlashBus = mk_static!(SharedFlashBus).init_with(
-        BlockingMutex::new(RefCell::new(FlashCell::new(flash_storage))),
+        BlockingMutex::new(RefCell::new(FlashCell::new(FlashStorage::new(
+            // SAFETY: the FLASH peripheral was owned by the partition-table
+            // reader above, which is dropped; nothing else takes a handle.
+            unsafe { esp_hal::peripherals::FLASH::steal() },
+        )))),
     );
 
     let nvs = pt

@@ -27,7 +27,7 @@ where
     pub async fn sample_mv(&mut self, adc: &mut Adc<'d, ADC1<'d>, Async>) -> u32 {
         let mut sum = 0u32;
         for _ in 0..BATTERY_SAMPLE_COUNT {
-            sum += u32::from(adc.read_oneshot(&mut self.pin).await);
+            sum += u32::from(adc.read_oneshot(&mut self.pin).await.unwrap());
             Timer::after(Duration::from_millis(BATTERY_SAMPLE_GAP.as_millis())).await;
         }
 
