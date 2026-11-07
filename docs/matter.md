@@ -37,6 +37,15 @@ The deadband only means anything *within* one boot. A deep sleep is a reboot, th
 dataver starts again, and every subscribed attribute is re-reported on the next
 wake-up. Suppressing that by persisting the last reported value would buy nothing.
 
+The sampling interval is constant, on the same reasoning. The reported percent
+scale decays roughly linearly - the trip from 100% to 90% takes about as long as
+the one from 10% to 0% - so a fixed interval samples the process at uniform
+resolution. An interval that adapted to the reading (dry soil polled faster,
+wet soil slept longer) would spend `IdleModeDuration` writes and
+re-advertisement on information the linearity already gives, so it was rejected;
+the tuning note in `core/src/tuning.rs` on `LIT_POLL_PERIOD_MS` carries the
+energy argument that picked the number.
+
 ## The device is a sleepy end device, and mostly asleep
 
 The Thread role is a Sleepy End Device: the receiver is off between data polls and
@@ -110,9 +119,12 @@ share is the datasheet's ~7 µA, and the boost converter - which the firmware
 cannot gate, see [`hardware.md`](hardware.md) - keeps the 3V3 rail alive
 through the sleep for the rest.
 
-One wake-up per idle period therefore costs ~0.96 mA of average current at the
-15-minute idle and ~0.54 mA at the 30-minute one - months on an AA cell, in the
-same league as the stock Wi-Fi firmware's reported 4-5 months.
+One wake-up per idle period therefore cost ~0.54 mA of average current at the
+old 30-minute idle; at the 6-hour one it is ~0.16 mA, because the deep-sleep
+floor - not the wakes - is the budget now. That is over a year on an AA cell,
+well past the stock Wi-Fi firmware's reported 4-5 months, and past the point
+where stretching the idle further buys anything measurable: the next gain
+lives in the carrier board's sleep current, not in the cadence.
 
 `make sim` turns this into an average current and a battery life. Its currents
 are the measured ones, and its per-wake time is the simulation's own accounting

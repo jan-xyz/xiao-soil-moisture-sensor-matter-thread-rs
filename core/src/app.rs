@@ -606,7 +606,7 @@ mod tests {
         let now = Instant::from_secs(60);
         let (app, _) = settled(lit_idle(now));
         let mut icd = lit_idle(now);
-        icd.poll_interval_ms = 10_000_000;
+        icd.poll_interval_ms = 30_000_000;
         let ports = Fake::new(icd).at(now);
         assert_eq!(
             app.sleep_for(&ports, icd),

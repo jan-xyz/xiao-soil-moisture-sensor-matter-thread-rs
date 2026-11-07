@@ -22,7 +22,8 @@ pub const AWAKE_MA: f64 = 100.0;
 /// Measured with a multimeter in series with the cell: 0.12 mA in deep
 /// sleep. The datasheet's figure for the chip alone is 7 uA; the rest is the
 /// carrier board around it (boost converter, charger path, sense divider).
-/// Worth hunting, but at a ~0.4% awake duty it is only ~12% of the average.
+/// Worth hunting: at the 6-hour idle the awake duty is ~0.05%, so this floor
+/// is most of the average now.
 pub const ASLEEP_UA: f64 = 120.0;
 
 /// A representative AA cell, in milliamp-hours. Capacity depends on the drain
@@ -34,8 +35,9 @@ pub const AA_CAPACITY_MAH: f64 = 2500.0;
 /// the Thread attach, the CASE resumption, the subscription's priming report
 /// and the final persist.
 ///
-/// Measured on the hardware, from a debug-logged wake at the current
-/// reachability tuning (150 ms fast poll, 1 s active threshold, 30 min idle):
+/// Measured on the hardware, from a debug-logged wake at the reachability
+/// tuning of that measurement (150 ms fast poll, 1 s active threshold, a
+/// 30-minute idle - the wake's length does not depend on the idle period):
 /// 7.55 s awake end to end, of which the simulation's own accounting covers
 /// the decision layer's ~2.4 s (the wake-phase measurement and the
 /// active-window bookkeeping), so this is the stack's remaining share. A

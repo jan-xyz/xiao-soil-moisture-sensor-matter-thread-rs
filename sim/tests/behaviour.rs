@@ -384,7 +384,8 @@ fn the_first_boot_of_a_simulation_is_a_cold_one() {
 fn boots_after_the_first_are_woken_by_the_sleep_timer() {
     let mut world = World::new();
 
-    world.run_until(2 * HOUR);
+    // A horizon past one idle period, so there is a wake to inspect.
+    world.run_until(8 * HOUR);
 
     let wakes: Vec<WakeCause> = world.boots().iter().skip(1).map(|b| b.wake).collect();
     assert!(!wakes.is_empty());

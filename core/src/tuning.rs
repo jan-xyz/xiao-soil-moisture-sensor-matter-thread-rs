@@ -139,13 +139,28 @@ pub const SIT_SLOW_POLL_MAX_MS: u32 = 15_000;
 pub const SIT_POLL_PERIOD_MS: u32 = 15_000;
 
 /// The idle period of Long Idle Time operation, in milliseconds. This is both
-/// the advertised idle interval and the length of a deep sleep, because a
-/// device that sleeps does not poll. Subscriptions pick their max interval
-/// from it, and reporting is delta-gated anyway, so stretching it halves the
-/// wake count for the same data. Well inside the cluster's 18 h ceiling; the
-/// advertised interval is what a peer waits for an idle us, and one hour is
-/// the spec's cap on that - 30 minutes keeps a margin under it.
-pub const LIT_POLL_PERIOD_MS: u32 = 1_800_000;
+/// the idle interval the stack serves and the length of a deep sleep, because
+/// a device that sleeps does not poll. Subscriptions pick their max interval
+/// from it, and reporting is delta-gated anyway, so stretching it cuts the
+/// wake count for the same data.
+///
+/// Six hours is where the measured budget turns. A wake costs ~100 mA for
+/// ~10 s at the cell and the deep sleep sits at 0.12 mA, so the awake share
+/// of the average drops from ~0.55 mA at a 30-minute idle to ~0.05 mA here,
+/// and the sleep floor becomes the dominant term: every further hour buys at
+/// most ~0.02 mA while staleness grows in step, so hunting the carrier
+/// board's sleep current is worth more than more sleep. The cluster's 18 h
+/// ceiling would still admit the extreme, and the 1 h cap the spec puts on
+/// an advertised idle interval no longer binds a device that sleeps, because
+/// a LIT advertises no `SII` at all (rs-matter `bf3fe6b`).
+///
+/// Constant on purpose, even though the reading could set it. The reported
+/// percent scale decays roughly linearly - the trip from 100% to 90% takes
+/// about as long as the one from 10% to 0% - so a fixed interval samples that
+/// process at uniform resolution, and an interval that adapted to the
+/// moisture would spend `IdleModeDuration` writes and re-advertisement on
+/// information the linearity already gives.
+pub const LIT_POLL_PERIOD_MS: u32 = 21_600_000;
 
 /// The same, in whole seconds, as the protocol's idle-mode duration.
 pub const LIT_IDLE_MODE_DURATION_SECS: u32 = LIT_POLL_PERIOD_MS / 1_000;

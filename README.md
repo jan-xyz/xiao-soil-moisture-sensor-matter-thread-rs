@@ -95,13 +95,13 @@ The device is a Long Idle Time ICD, and it deep-sleeps between wake-ups. While n
 controller has registered for Check-Ins it operates as a Short Idle Time device
 instead and **never sleeps**, because it has to stay reachable within seconds.
 
-The budget is dominated by the seconds it must stay awake after each wake-up -
-long enough to attach to Thread, announce itself and take a reading. Measured
-on the board: ~100 mA at the cell while awake (the Thread radio, the CPU, and
-the boost converter that makes 3.3 V out of the 1.5 V cell), ~0.12 mA asleep -
-so one wake-up costs about as much as a full day of deep sleep, and the
-wake-up cadence is most of the battery story. At the 30-minute idle that is
-~0.5 mA of average current: months on an AA, not years.
+Each wake must stay up for seconds - long enough to attach to Thread, announce
+itself and take a reading. Measured on the board: ~100 mA at the cell while
+awake (the Thread radio, the CPU, and the boost converter that makes 3.3 V out
+of the 1.5 V cell), ~0.12 mA asleep. The idle period is 6 hours, so a wake
+every period draws ~0.05 mA of average against the sleep's 0.12 mA: the
+battery story is now the carrier board's sleep floor as much as the wake
+cadence, and `make sim` puts a 2500 mAh AA at well over a year.
 
 `make sim` turns that into a battery life from the measured currents, plus the
 assumptions it still carries - that number is a *model*, not a measurement.
@@ -134,7 +134,10 @@ Consequences of the deep-sleeping LIT profile (see [Power](#power)):
   wake-up. That is fine for a sensor and not fine for anything a user expects to
   react to - which is why this is a LIT device and not a SIT one.
 - **The idle period is fixed at build time.** One number is both the advertised
-  idle interval and the deep-sleep length, and there is no runtime knob.
+  idle interval and the deep-sleep length, and there is no runtime knob - on
+  purpose, because the reported scale decays roughly linearly, so a fixed
+  interval samples it at uniform resolution and an adaptive one would buy
+  nothing but protocol churn. See [`docs/matter.md`](docs/matter.md).
 - **The active window is the energy budget.** It has to cover the Thread attach
   and the Check-In exchange on a real network, and it is set by reasoning rather
   than measured on this board.
