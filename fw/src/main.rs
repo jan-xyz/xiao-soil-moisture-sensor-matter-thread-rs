@@ -631,20 +631,25 @@ async fn main(s: Spawner) {
 
         // A record that never reaches flash costs one full handshake on the
         // next wake-up, so a failed write is logged, not a reason to crash.
+        // The writer returns on its first failed write, so it is restarted:
+        // a writer that stays down misses every later change in this boot.
+        // The restart waits for the next change, and each write stores the
+        // whole cache, so the next one also carries what failed.
         let persist_resumption = pin!(async {
-            if let Err(e) = stack
-                .matter()
-                .run_persist_resumption(
-                    &kv,
-                    embassy_time::Duration::from_millis(
-                        tuning::RESUMPTION_PERSIST_DEBOUNCE.as_millis(),
-                    ),
-                )
-                .await
-            {
-                warn!("CASE resumption records persist failed: {e:?}");
+            loop {
+                if let Err(e) = stack
+                    .matter()
+                    .run_persist_resumption(
+                        &kv,
+                        embassy_time::Duration::from_millis(
+                            tuning::RESUMPTION_PERSIST_DEBOUNCE.as_millis(),
+                        ),
+                    )
+                    .await
+                {
+                    warn!("CASE resumption records persist failed: {e:?}");
+                }
             }
-            core::future::pending::<()>().await
         });
 
         match select3(matter, persist_resumption, run_boot(&mut esp_ports, app)).await {
