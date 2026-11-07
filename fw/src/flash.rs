@@ -41,6 +41,7 @@
 //! at the price of per-call machinery, and there is little left to overlap.
 
 use core::cell::RefCell;
+use core::fmt;
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
@@ -63,7 +64,8 @@ impl<'d> FlashCell<'d> {
         }
     }
 
-    /// Runs one operation against the region of `partition`.
+    /// Runs one operation against the region of `partition`, and logs it if
+    /// it fails.
     ///
     /// The region exists only for the closure's duration, which keeps the
     /// two partitions' regions from overlapping: nothing else can hold a
@@ -71,58 +73,62 @@ impl<'d> FlashCell<'d> {
     fn with_region<R>(
         &self,
         partition: PartitionEntry,
+        op: Op,
         f: impl FnOnce(&mut FlashRegion<'_, 'd>) -> Result<R, Error>,
     ) -> Result<R, Error> {
         let mut flash = self.flash.borrow_mut();
-        match partition.as_flash_region(&mut flash) {
-            Ok(mut region) => f(&mut region),
-            // Only an encrypted partition lands here; the storage partitions
-            // never are, and this firmware does not enable flash encryption.
-            Err(e) => Err(e),
+        // `as_flash_region` only fails for an encrypted partition; the
+        // storage partitions never are, and this firmware does not enable
+        // flash encryption.
+        let result = partition
+            .as_flash_region(&mut flash)
+            .and_then(|mut region| f(&mut region));
+        if let Err(e) = &result {
+            let label = partition.label_as_str();
+            error!("Flash {op} in {label} failed: {e:?}");
         }
+        result
     }
 
     /// `offset` is partition-relative, like the region API.
     fn read(&self, partition: PartitionEntry, offset: u32, bytes: &mut [u8]) -> Result<(), Error> {
-        let result = self.with_region(partition, |region| region.read(offset, bytes));
-        if let Err(e) = &result {
-            error!(
-                "flash read {:#x}+{} in {} failed: {:?}",
-                offset,
-                bytes.len(),
-                partition.label_as_str(),
-                e
-            );
-        }
-        result
+        let op = Op::Read {
+            offset,
+            len: bytes.len(),
+        };
+        self.with_region(partition, op, |region| region.read(offset, bytes))
     }
 
     fn erase(&self, partition: PartitionEntry, from: u32, to: u32) -> Result<(), Error> {
-        let result = self.with_region(partition, |region| region.erase(from, to));
-        if let Err(e) = &result {
-            error!(
-                "flash erase {:#x}..{:#x} in {} failed: {:?}",
-                from,
-                to,
-                partition.label_as_str(),
-                e
-            );
-        }
-        result
+        self.with_region(partition, Op::Erase { from, to }, |region| {
+            region.erase(from, to)
+        })
     }
 
     fn write(&self, partition: PartitionEntry, offset: u32, bytes: &[u8]) -> Result<(), Error> {
-        let result = self.with_region(partition, |region| region.write(offset, bytes));
-        if let Err(e) = &result {
-            error!(
-                "flash write {:#x}+{} in {} failed: {:?}",
-                offset,
-                bytes.len(),
-                partition.label_as_str(),
-                e
-            );
+        let op = Op::Write {
+            offset,
+            len: bytes.len(),
+        };
+        self.with_region(partition, op, |region| region.write(offset, bytes))
+    }
+}
+
+/// One flash operation and its range, for the log of a failure.
+#[derive(Clone, Copy)]
+enum Op {
+    Read { offset: u32, len: usize },
+    Erase { from: u32, to: u32 },
+    Write { offset: u32, len: usize },
+}
+
+impl fmt::Display for Op {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Op::Read { offset, len } => write!(f, "read {offset:#x}+{len}"),
+            Op::Erase { from, to } => write!(f, "erase {from:#x}..{to:#x}"),
+            Op::Write { offset, len } => write!(f, "write {offset:#x}+{len}"),
         }
-        result
     }
 }
 
