@@ -45,6 +45,8 @@ pub struct Boot {
 /// The state of one boot. Volatile by definition: a new boot starts from
 /// [`App::new`] and nothing else.
 pub struct App {
+    /// When this boot began. [`tuning::LIT_BOOT_MAX`] is measured from here.
+    started_at: Instant,
     calibration: crate::ports::Calibration,
     button: ButtonFsm,
     next_sample: Instant,
@@ -67,6 +69,7 @@ impl App {
     /// and that is exactly the bug this signature prevents.
     pub fn new(boot: Boot, calibration: crate::ports::Calibration) -> Self {
         Self {
+            started_at: boot.now,
             calibration,
             button: ButtonFsm::new(boot.wake == WakeCause::Button, boot.now),
             next_sample: boot.now,
@@ -229,6 +232,10 @@ impl App {
         );
         consider(self.button.next_deadline(), &mut earliest);
         consider(
+            Some(self.started_at.saturating_add(tuning::LIT_BOOT_MAX)),
+            &mut earliest,
+        );
+        consider(
             self.idle_since
                 .map(|idle_since| idle_since.saturating_add(tuning::SLEEP_SETTLE)),
             &mut earliest,
@@ -296,6 +303,14 @@ impl App {
         // sleep that long, plus the reboot it ends in, would break that.
         if icd.operating_mode != OperatingMode::Lit {
             return None;
+        }
+
+        if ports.now().saturating_since(self.started_at) >= tuning::LIT_BOOT_MAX {
+            warn!(
+                "Boot awake for {} s, past the limit: sleeping anyway",
+                tuning::LIT_BOOT_MAX.as_secs()
+            );
+            return Some(u64::from(tuning::LIT_POLL_PERIOD_MS));
         }
 
         if icd.power_mode != PowerMode::Idle {
@@ -515,126 +530,170 @@ mod tests {
         }
     }
 
-    /// An app that has been idle long enough to be allowed to sleep, and a
-    /// world that agrees.
-    fn settled(icd: IcdState) -> (App, Fake) {
-        let now = Instant::from_secs(60);
-        let mut app = App::new(
-            Boot {
+    fn lit_idle_polling(now: Instant, poll_interval_ms: u32, idle_for: Millis) -> IcdState {
+        IcdState {
+            poll_interval_ms,
+            idle_until: Some(now + idle_for),
+            ..lit_idle(now)
+        }
+    }
+
+    fn sit_idle(now: Instant) -> IcdState {
+        IcdState {
+            operating_mode: OperatingMode::Sit,
+            ..lit_idle(now)
+        }
+    }
+
+    const MINUTE: Instant = Instant::from_secs(60);
+    const PAST_THE_CAP: Instant = Instant::from_secs(tuning::LIT_BOOT_MAX.as_secs());
+
+    struct SleepTestCase {
+        name: &'static str,
+        wake: WakeCause,
+        boot_at: Instant,
+        now: Instant,
+        idle_since: Option<Instant>,
+        icd: IcdState,
+        expected: Option<u64>,
+    }
+
+    #[test]
+    fn test_sleep_for() {
+        let test_cases = vec![
+            SleepTestCase {
+                name: "a settled long idle device sleeps for the idle period",
                 wake: WakeCause::Timer,
-                now: Instant::ZERO,
-                after_crash: false,
+                boot_at: Instant::ZERO,
+                now: MINUTE,
+                idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
+                icd: lit_idle(MINUTE),
+                expected: Some(u64::from(tuning::LIT_POLL_PERIOD_MS)),
             },
-            Calibration::DEFAULT,
-        );
-        app.idle_since = Some(now.saturating_sub(tuning::SLEEP_SETTLE));
-        (app, Fake::new(icd).at(now))
-    }
-
-    #[test]
-    fn a_short_idle_device_never_sleeps() {
-        let (app, ports) = settled(lit_idle(Instant::from_secs(60)));
-        let mut icd = ports.icd();
-        icd.operating_mode = OperatingMode::Sit;
-
-        assert_eq!(
-            app.sleep_for(&ports, icd),
-            None,
-            "a short idle device has to stay reachable within seconds"
-        );
-    }
-
-    #[test]
-    fn an_active_device_never_sleeps() {
-        let (app, ports) = settled(lit_active());
-        assert_eq!(app.sleep_for(&ports, ports.icd()), None);
-    }
-
-    #[test]
-    fn a_device_that_has_not_settled_yet_never_sleeps() {
-        let now = Instant::from_secs(60);
-        let icd = lit_idle(now);
-        let ports = Fake::new(icd).at(now);
-
-        let mut app = App::new(
-            Boot {
+            SleepTestCase {
+                name: "a short idle device has to stay reachable within seconds",
                 wake: WakeCause::Timer,
-                now: Instant::ZERO,
-                after_crash: false,
+                boot_at: Instant::ZERO,
+                now: MINUTE,
+                idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
+                icd: sit_idle(MINUTE),
+                expected: None,
             },
-            Calibration::DEFAULT,
-        );
-        app.idle_since = Some(now);
-
-        assert_eq!(
-            app.sleep_for(&ports, icd),
-            None,
-            "the settle delay lets flash writes finish"
-        );
-
-        app.idle_since = Some(now.saturating_sub(tuning::SLEEP_SETTLE));
-        assert!(app.sleep_for(&ports, icd).is_some());
-    }
-
-    #[test]
-    fn a_gesture_in_progress_keeps_the_boot_awake() {
-        let (app, ports) = settled(lit_idle(Instant::from_secs(60)));
-        let _ = app;
-
-        // A boot caused by the button starts mid-press.
-        let mut pressed = App::new(
-            Boot {
+            SleepTestCase {
+                name: "an active device never sleeps",
+                wake: WakeCause::Timer,
+                boot_at: Instant::ZERO,
+                now: MINUTE,
+                idle_since: None,
+                icd: lit_active(),
+                expected: None,
+            },
+            SleepTestCase {
+                name: "the settle delay lets flash writes finish",
+                wake: WakeCause::Timer,
+                boot_at: Instant::ZERO,
+                now: MINUTE,
+                idle_since: Some(MINUTE),
+                icd: lit_idle(MINUTE),
+                expected: None,
+            },
+            SleepTestCase {
+                name: "the press that woke the device is still going on",
                 wake: WakeCause::Button,
-                now: Instant::from_secs(60),
-                after_crash: false,
+                boot_at: MINUTE,
+                now: MINUTE,
+                idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
+                icd: lit_idle(MINUTE),
+                expected: None,
             },
-            Calibration::DEFAULT,
-        );
-        pressed.idle_since = Some(Instant::from_secs(60).saturating_sub(tuning::SLEEP_SETTLE));
+            SleepTestCase {
+                name: "the idle period caps a longer poll interval",
+                wake: WakeCause::Timer,
+                boot_at: Instant::ZERO,
+                now: MINUTE,
+                idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
+                icd: lit_idle_polling(
+                    MINUTE,
+                    30_000_000,
+                    Millis::from_millis(u64::from(tuning::LIT_POLL_PERIOD_MS)),
+                ),
+                expected: Some(u64::from(tuning::LIT_POLL_PERIOD_MS)),
+            },
+            SleepTestCase {
+                name: "a shorter poll interval wins over the idle period",
+                wake: WakeCause::Timer,
+                boot_at: Instant::ZERO,
+                now: MINUTE,
+                idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
+                icd: lit_idle_polling(
+                    MINUTE,
+                    5_000,
+                    Millis::from_millis(u64::from(tuning::LIT_POLL_PERIOD_MS)),
+                ),
+                expected: Some(5_000),
+            },
+            SleepTestCase {
+                name: "the reboot a wake-up costs is worth more than a very short sleep",
+                wake: WakeCause::Timer,
+                boot_at: Instant::ZERO,
+                now: MINUTE,
+                idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
+                icd: lit_idle_polling(MINUTE, 1, Millis::from_millis(1)),
+                expected: Some(tuning::SLEEP_MIN.as_millis()),
+            },
+            SleepTestCase {
+                name: "a long idle device stuck in active mode sleeps at the cap",
+                wake: WakeCause::Timer,
+                boot_at: Instant::ZERO,
+                now: PAST_THE_CAP,
+                idle_since: None,
+                icd: lit_active(),
+                expected: Some(u64::from(tuning::LIT_POLL_PERIOD_MS)),
+            },
+            SleepTestCase {
+                name: "the cap is measured from the start of the boot",
+                wake: WakeCause::Timer,
+                boot_at: MINUTE,
+                now: PAST_THE_CAP,
+                idle_since: None,
+                icd: lit_active(),
+                expected: None,
+            },
+            SleepTestCase {
+                name: "a short idle device stays awake past the cap",
+                wake: WakeCause::Timer,
+                boot_at: Instant::ZERO,
+                now: PAST_THE_CAP,
+                idle_since: None,
+                icd: sit_idle(PAST_THE_CAP),
+                expected: None,
+            },
+        ];
 
-        assert_eq!(
-            pressed.sleep_for(&ports, ports.icd()),
-            None,
-            "the press that woke the device is still going on"
-        );
-    }
+        for SleepTestCase {
+            name,
+            wake,
+            boot_at,
+            now,
+            idle_since,
+            icd,
+            expected,
+        } in test_cases
+        {
+            let mut app = App::new(
+                Boot {
+                    wake,
+                    now: boot_at,
+                    after_crash: false,
+                },
+                Calibration::DEFAULT,
+            );
+            app.idle_since = idle_since;
+            let ports = Fake::new(icd).at(now);
 
-    #[test]
-    fn the_sleep_length_is_the_poll_interval_capped_by_the_idle_period() {
-        // A poll interval far longer than the remaining idle period: the idle
-        // period wins, because that is when the device has to poll again.
-        let now = Instant::from_secs(60);
-        let (app, _) = settled(lit_idle(now));
-        let mut icd = lit_idle(now);
-        icd.poll_interval_ms = 30_000_000;
-        let ports = Fake::new(icd).at(now);
-        assert_eq!(
-            app.sleep_for(&ports, icd),
-            Some(u64::from(tuning::LIT_POLL_PERIOD_MS))
-        );
-
-        // The other way round: the poll interval wins.
-        let mut icd = lit_idle(now);
-        icd.poll_interval_ms = 5_000;
-        let ports = Fake::new(icd).at(now);
-        assert_eq!(app.sleep_for(&ports, icd), Some(5_000));
-    }
-
-    #[test]
-    fn the_sleep_floor_keeps_a_wake_up_worth_it() {
-        let now = Instant::from_secs(60);
-        let (app, _) = settled(lit_idle(now));
-
-        let mut icd = lit_idle(now);
-        icd.poll_interval_ms = 1;
-        icd.idle_until = Some(now + Millis::from_millis(1));
-        let ports = Fake::new(icd).at(now);
-
-        assert_eq!(
-            app.sleep_for(&ports, icd),
-            Some(tuning::SLEEP_MIN.as_millis()),
-            "the reboot a wake-up costs is worth more than a very short sleep"
-        );
+            let result = app.sleep_for(&ports, icd);
+            assert_eq!(result, expected, "Failed case: '{name}'");
+        }
     }
 
     struct EstimateTestCase {

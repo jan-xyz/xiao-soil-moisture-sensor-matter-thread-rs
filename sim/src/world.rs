@@ -75,6 +75,9 @@ struct IcdModel {
     /// Absolute virtual time the active window ends.
     active_until: u64,
     poll_interval_ms: u32,
+    /// The stack never leaves active mode once it has started: the wedged
+    /// stack that `tuning::LIT_BOOT_MAX` exists for.
+    stuck_active: bool,
 }
 
 /// One boot, as the world saw it.
@@ -164,6 +167,7 @@ impl World {
                 lit_at: 0,
                 active_until: 0,
                 poll_interval_ms: tuning::LIT_POLL_PERIOD_MS,
+                stuck_active: false,
             },
             icd_active: true,
             operating_mode_lit: true,
@@ -211,6 +215,12 @@ impl World {
     /// turns that into a clear failure rather than a hang.
     pub fn lit_at(mut self, at_ms: u64) -> Self {
         self.icd.lit_at = at_ms;
+        self
+    }
+
+    /// Wedge the protocol stack in active mode from its startup on.
+    pub fn stuck_active(mut self) -> Self {
+        self.icd.stuck_active = true;
         self
     }
 
@@ -326,7 +336,11 @@ impl World {
 
         // The protocol stack starts here, after the wake phase - so the
         // modelled ICD's active window opens now, sized as the stack's own.
-        self.icd.active_until = self.clock + tuning::ACTIVE_HOLD.as_millis();
+        self.icd.active_until = if self.icd.stuck_active {
+            u64::MAX
+        } else {
+            self.clock + tuning::ACTIVE_HOLD.as_millis()
+        };
         self.sync_icd();
 
         let mut ports = SimPorts {

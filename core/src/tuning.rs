@@ -231,6 +231,19 @@ pub const WATCHDOG_TIMEOUT: Millis = Millis::from_secs(120);
 
 const _: () = assert!(WATCHDOG_TIMEOUT.as_millis() >= 2 * SAMPLE_PERIOD.as_millis());
 
+/// The longest a boot in Long Idle Time operation may stay awake. Past it the
+/// boot sleeps for a full idle period, whatever the protocol stack says.
+///
+/// The watchdog only proves that the boot loop still waits. A protocol stack
+/// that wedges in active mode keeps the loop waiting, and so feeding the
+/// watchdog, with the radio on until the cell is empty. The longest awake
+/// stretch a LIT boot plans is the calibration's active hold, so ten minutes
+/// leaves a wide margin. A short idle device has to stay reachable, so the
+/// cap does not apply to it.
+pub const LIT_BOOT_MAX: Millis = Millis::from_secs(600);
+
+const _: () = assert!(LIT_BOOT_MAX.as_millis() >= 2 * CALIBRATION_ACTIVE_HOLD.as_millis());
+
 /// How many boots in a row may crash before the next one backs off. A crashed
 /// boot is any boot that did not reach a planned end: a panic, a watchdog
 /// reset, a brown-out.

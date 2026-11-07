@@ -9,7 +9,7 @@ use soil_sensor_core::ports::{OperatingMode, Outcome, WakeCause};
 use soil_sensor_core::tuning;
 
 use soil_sensor_sim::energy::Energy;
-use soil_sensor_sim::{Script, World};
+use soil_sensor_sim::{BootRecord, Script, World};
 
 const MINUTE: u64 = 60_000;
 const HOUR: u64 = 60 * MINUTE;
@@ -77,6 +77,26 @@ fn a_scenario_that_never_becomes_long_idle_is_a_clear_failure_not_a_hang() {
     assert!(
         result.is_err(),
         "a device that stays reachable by design must not look like a hang"
+    );
+}
+
+#[test]
+fn a_long_idle_boot_with_a_wedged_stack_sleeps_at_the_cap() {
+    let mut world = World::new().stuck_active();
+
+    world.run_boot(WakeCause::Timer);
+
+    assert_eq!(
+        world.boots(),
+        &[BootRecord {
+            started_at_ms: 0,
+            wake: WakeCause::Timer,
+            outcome: Outcome::Sleep {
+                for_ms: u64::from(tuning::LIT_POLL_PERIOD_MS),
+            },
+            awake_ms: tuning::LIT_BOOT_MAX.as_millis(),
+        }],
+        "a stack stuck in active mode must not keep the radio on until the cell is empty"
     );
 }
 

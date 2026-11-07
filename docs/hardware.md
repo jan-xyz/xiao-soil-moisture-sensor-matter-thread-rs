@@ -177,6 +177,13 @@ the device layer feeds it in `Ports::next_event` and `Ports::delay`. Every wait
 of the boot loop goes through one of those two, so the watchdog fires exactly
 when the loop stops waiting. It is turned off before every deep sleep.
 
+The watchdog only proves that the loop still waits. It does not prove that the
+boot ever ends. A protocol stack that wedges in active mode keeps the loop
+waiting, and so keeps the watchdog fed. For that case the decision layer caps a
+boot in Long Idle Time operation at `tuning::LIT_BOOT_MAX`, and then sleeps for
+a full idle period. A short idle device has to stay reachable, so the cap does
+not apply to it.
+
 A crash that repeats in a boot's startup, for example on a flash error the
 protocol stack cannot get past, would still be a loop: panic, reset, the same
 crash. The count of boots in a row that did not reach a planned end lives in RTC
