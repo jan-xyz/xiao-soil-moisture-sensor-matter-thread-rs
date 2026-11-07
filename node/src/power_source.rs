@@ -18,7 +18,7 @@
 //! divide by, and the attribute would only add report weight (and a fiction)
 //! for a controller that cannot act on it anyway.
 
-use core::cell::RefCell;
+use core::cell::Cell;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
@@ -32,7 +32,7 @@ use rs_matter::with;
 pub use rs_matter::dm::clusters::decl::power_source::*;
 
 use soil_sensor_core::ports::BatteryReading;
-use soil_sensor_core::tuning::BATTERY_REPORT_DELTA_MV;
+use soil_sensor_core::tuning::{BATTERY_REPORT_DELTA_HALF_PERCENT, BATTERY_REPORT_DELTA_MV};
 
 pub const CLUSTER: Cluster<'static> = FULL_CLUSTER
     .with_features(Feature::BATTERY.bits())
@@ -50,40 +50,36 @@ pub const CLUSTER: Cluster<'static> = FULL_CLUSTER
 const CHARGE_LEVEL_WARNING_BELOW_PERCENT: u8 = 20;
 const CHARGE_LEVEL_CRITICAL_BELOW_PERCENT: u8 = 5;
 
-struct Reading {
-    percent: Option<u8>,
-    rest_mv: Option<u32>,
+/// The charge level of a reading, or `OK` for no cell: an empty holder on USB
+/// power is not a battery to warn about.
+fn charge_level(reading: Option<BatteryReading>) -> BatChargeLevelEnum {
+    match reading.map(|reading| reading.half_percent) {
+        Some(half_percent) if half_percent < 2 * CHARGE_LEVEL_CRITICAL_BELOW_PERCENT => {
+            BatChargeLevelEnum::Critical
+        }
+        Some(half_percent) if half_percent < 2 * CHARGE_LEVEL_WARNING_BELOW_PERCENT => {
+            BatChargeLevelEnum::Warning
+        }
+        _ => BatChargeLevelEnum::OK,
+    }
 }
 
-/// The last-reported battery reading, or `None`s if never reported. Shared
-/// between the sampling loop (writer) and the cluster handler (reader).
-pub struct BatteryCell(Mutex<CriticalSectionRawMutex, RefCell<Reading>>);
+/// The last-reported battery reading, or `None` if never reported or there is
+/// no cell. Shared between the sampling loop (writer) and the cluster handler
+/// (reader).
+pub struct BatteryCell(Mutex<CriticalSectionRawMutex, Cell<Option<BatteryReading>>>);
 
 impl BatteryCell {
     pub const fn new() -> Self {
-        Self(Mutex::new(RefCell::new(Reading {
-            percent: None,
-            rest_mv: None,
-        })))
+        Self(Mutex::new(Cell::new(None)))
     }
 
-    fn get(&self) -> Reading {
-        self.0.lock(|cell| {
-            let reading = cell.borrow();
-            Reading {
-                percent: reading.percent,
-                rest_mv: reading.rest_mv,
-            }
-        })
+    fn get(&self) -> Option<BatteryReading> {
+        self.0.lock(Cell::get)
     }
 
     fn set(&self, reading: Option<BatteryReading>) {
-        self.0.lock(|cell| {
-            *cell.borrow_mut() = Reading {
-                percent: reading.map(|reading| reading.percent),
-                rest_mv: reading.map(|reading| reading.rest_mv),
-            }
-        });
+        self.0.lock(|cell| cell.set(reading));
     }
 }
 
@@ -92,6 +88,14 @@ impl Default for BatteryCell {
         Self::new()
     }
 }
+
+/// The attributes one reading sets, and so the ones a report has to name.
+const READING_ATTRIBUTES: [AttributeId; 4] = [
+    AttributeId::BatPercentRemaining,
+    AttributeId::BatVoltage,
+    AttributeId::BatChargeLevel,
+    AttributeId::BatReplacementNeeded,
+];
 
 pub struct PowerSourceHandler<'a> {
     endpoint_id: EndptId,
@@ -114,22 +118,32 @@ impl<'a> PowerSourceHandler<'a> {
         }
     }
 
-    /// Called by the sampling loop with a freshly measured resting voltage,
-    /// the derived percent, or `None` when there is no cell. Only reports
-    /// (stores the reading, bumps the dataver and wakes `run()` to push a
-    /// subscription update) when the voltage moved by at least
-    /// `BATTERY_REPORT_DELTA_MV` since the last report, or when the cell
-    /// becomes available or unavailable, so ADC jitter does not wake the
-    /// Thread radio but a slow discharge still reaches the controller.
+    /// Called by the sampling loop with a fresh estimate, or `None` when there
+    /// is no cell. Only reports (stores the reading, bumps the dataver and
+    /// wakes `run()` to push a subscription update) when the voltage moved by
+    /// at least `BATTERY_REPORT_DELTA_MV` since the last report, the charge by
+    /// at least `BATTERY_REPORT_DELTA_HALF_PERCENT`, the charge level changed,
+    /// or the cell became available or unavailable. ADC jitter does not wake
+    /// the Thread radio, but a slow discharge still reaches the controller.
+    ///
+    /// The voltage alone is not enough: the battery curve is steep enough that
+    /// a change inside the voltage deadband can cross a charge-level threshold.
     pub fn report(&self, reading: Option<BatteryReading>) {
         let reported = self.reading.get();
-        let should_report = match reading {
-            Some(reading) => soil_sensor_core::should_report(
-                reported.rest_mv,
-                reading.rest_mv,
-                BATTERY_REPORT_DELTA_MV as u32,
-            ),
-            None => reported.rest_mv.is_some(),
+        let should_report = match (reported, reading) {
+            (Some(reported), Some(reading)) => {
+                soil_sensor_core::should_report(
+                    Some(reported.rest_mv),
+                    reading.rest_mv,
+                    BATTERY_REPORT_DELTA_MV as u32,
+                ) || soil_sensor_core::should_report(
+                    Some(u32::from(reported.half_percent)),
+                    u32::from(reading.half_percent),
+                    u32::from(BATTERY_REPORT_DELTA_HALF_PERCENT),
+                ) || charge_level(Some(reported)) != charge_level(Some(reading))
+            }
+            (None, None) => false,
+            _ => true,
         };
 
         if should_report {
@@ -137,8 +151,15 @@ impl<'a> PowerSourceHandler<'a> {
         }
 
         match reading {
-            Some(BatteryReading { percent, rest_mv }) => {
-                log::info!("Battery: {percent}% ({rest_mv} mV, reported change: {should_report})")
+            Some(BatteryReading {
+                half_percent,
+                rest_mv,
+            }) => {
+                let percent = half_percent / 2;
+                let half = if half_percent % 2 == 0 { "" } else { ".5" };
+                log::info!(
+                    "Battery: {percent}{half}% ({rest_mv} mV, reported change: {should_report})"
+                )
             }
             None => log::info!("Battery: unknown (reported change: {should_report})"),
         }
@@ -164,16 +185,9 @@ impl ClusterHandler for PowerSourceHandler<'_> {
     async fn run(&self, ctx: impl HandlerContext) -> Result<(), Error> {
         loop {
             self.changed.wait_signalled().await;
-            ctx.notify_attr_changed(
-                self.endpoint_id,
-                Self::CLUSTER.id,
-                AttributeId::BatPercentRemaining as _,
-            );
-            ctx.notify_attr_changed(
-                self.endpoint_id,
-                Self::CLUSTER.id,
-                AttributeId::BatVoltage as _,
-            );
+            for attribute in READING_ATTRIBUTES {
+                ctx.notify_attr_changed(self.endpoint_id, Self::CLUSTER.id, attribute as _);
+            }
         }
     }
 
@@ -210,36 +224,25 @@ impl ClusterHandler for PowerSourceHandler<'_> {
     }
 
     fn bat_percent_remaining(&self, _ctx: impl ReadContext) -> Result<Nullable<u8>, Error> {
-        // Half-percent units per spec (0-200 represents 0-100%).
-        Ok(match self.reading.get().percent {
-            Some(percent) => Nullable::some(percent.saturating_mul(2)),
+        Ok(match self.reading.get() {
+            Some(reading) => Nullable::some(reading.half_percent),
             None => Nullable::none(),
         })
     }
 
     fn bat_voltage(&self, _ctx: impl ReadContext) -> Result<Nullable<u32>, Error> {
-        Ok(match self.reading.get().rest_mv {
-            Some(mv) => Nullable::some(mv),
+        Ok(match self.reading.get() {
+            Some(reading) => Nullable::some(reading.rest_mv),
             None => Nullable::none(),
         })
     }
 
     fn bat_charge_level(&self, _ctx: impl ReadContext) -> Result<BatChargeLevelEnum, Error> {
-        Ok(match self.reading.get().percent {
-            Some(percent) if percent < CHARGE_LEVEL_CRITICAL_BELOW_PERCENT => {
-                BatChargeLevelEnum::Critical
-            }
-            Some(percent) if percent < CHARGE_LEVEL_WARNING_BELOW_PERCENT => {
-                BatChargeLevelEnum::Warning
-            }
-            _ => BatChargeLevelEnum::OK,
-        })
+        Ok(charge_level(self.reading.get()))
     }
 
     fn bat_replacement_needed(&self, _ctx: impl ReadContext) -> Result<bool, Error> {
-        Ok(
-            matches!(self.reading.get().percent, Some(percent) if percent < CHARGE_LEVEL_CRITICAL_BELOW_PERCENT),
-        )
+        Ok(charge_level(self.reading.get()) == BatChargeLevelEnum::Critical)
     }
 
     fn bat_replaceability(&self, _ctx: impl ReadContext) -> Result<BatReplaceabilityEnum, Error> {
@@ -252,73 +255,154 @@ impl ClusterHandler for PowerSourceHandler<'_> {
 mod tests {
     use super::*;
 
-    /// A handler over a cell of its own.
-    ///
-    /// The cell has to be per-handler: the last reported value lives in it, and
-    /// a shared one would let one test's reports suppress another's.
-    fn handler() -> PowerSourceHandler<'static> {
-        let cell: &'static BatteryCell = Box::leak(Box::new(BatteryCell::new()));
-        PowerSourceHandler::new(1, Dataver::new(0), cell)
+    fn reading(half_percent: u8, rest_mv: u32) -> Option<BatteryReading> {
+        Some(BatteryReading {
+            half_percent,
+            rest_mv,
+        })
     }
 
-    fn reading(percent: u8, rest_mv: u32) -> Option<BatteryReading> {
-        Some(BatteryReading { percent, rest_mv })
-    }
-
-    #[test]
-    fn the_first_reading_always_reports() {
-        let handler = handler();
-        let before = handler.dataver();
-
-        handler.report(reading(80, 1400));
-
-        assert_ne!(handler.dataver(), before);
+    struct ReportTestCase {
+        name: &'static str,
+        earlier: Option<Option<BatteryReading>>,
+        input: Option<BatteryReading>,
+        expected_reported: bool,
+        expected_stored: Option<BatteryReading>,
     }
 
     #[test]
-    fn voltage_jitter_below_the_deadband_is_not_reported() {
-        let handler = handler();
-        handler.report(reading(80, 1400));
-        let reported = handler.dataver();
+    fn test_report() {
+        let test_cases = vec![
+            ReportTestCase {
+                name: "the first reading always reports",
+                earlier: None,
+                input: reading(160, 1400),
+                expected_reported: true,
+                expected_stored: reading(160, 1400),
+            },
+            ReportTestCase {
+                name: "ten millivolts is converter noise at this scale",
+                earlier: Some(reading(160, 1400)),
+                input: reading(160, 1410),
+                expected_reported: false,
+                expected_stored: reading(160, 1400),
+            },
+            ReportTestCase {
+                name: "a voltage that moved enough is reported",
+                earlier: Some(reading(160, 1400)),
+                input: reading(158, 1380),
+                expected_reported: true,
+                expected_stored: reading(158, 1380),
+            },
+            ReportTestCase {
+                name: "a charge that moved enough is reported inside the voltage deadband",
+                earlier: Some(reading(80, 1260)),
+                input: reading(70, 1250),
+                expected_reported: true,
+                expected_stored: reading(70, 1250),
+            },
+            ReportTestCase {
+                name: "a crossing into the warning level is reported",
+                earlier: Some(reading(41, 1219)),
+                input: reading(39, 1218),
+                expected_reported: true,
+                expected_stored: reading(39, 1218),
+            },
+            ReportTestCase {
+                name: "a small change inside one charge level is not reported",
+                earlier: Some(reading(39, 1218)),
+                input: reading(37, 1215),
+                expected_reported: false,
+                expected_stored: reading(39, 1218),
+            },
+            ReportTestCase {
+                name: "a cell taken out is reported as unknown",
+                earlier: Some(reading(160, 1400)),
+                input: None,
+                expected_reported: true,
+                expected_stored: None,
+            },
+            ReportTestCase {
+                name: "no cell from the start is not news, the attributes are already null",
+                earlier: None,
+                input: None,
+                expected_reported: false,
+                expected_stored: None,
+            },
+        ];
 
-        handler.report(reading(80, 1410));
-        assert_eq!(
-            handler.dataver(),
-            reported,
-            "ten millivolts is converter noise at this scale"
-        );
+        for ReportTestCase {
+            name,
+            earlier,
+            input,
+            expected_reported,
+            expected_stored,
+        } in test_cases
+        {
+            // The cell is per case: the last reported value lives in it, and a
+            // shared one would let one case's reports suppress another's.
+            let cell: &'static BatteryCell = Box::leak(Box::new(BatteryCell::new()));
+            let handler = PowerSourceHandler::new(1, Dataver::new(0), cell);
+            if let Some(earlier) = earlier {
+                handler.report(earlier);
+            }
+            let before = handler.dataver();
+
+            handler.report(input);
+
+            let result = (handler.dataver() != before, cell.get());
+            assert_eq!(
+                result,
+                (expected_reported, expected_stored),
+                "Failed case: '{name}'"
+            );
+        }
+    }
+
+    struct ChargeLevelTestCase {
+        name: &'static str,
+        input: Option<BatteryReading>,
+        expected: BatChargeLevelEnum,
     }
 
     #[test]
-    fn a_reading_that_moved_enough_is_reported() {
-        let handler = handler();
-        handler.report(reading(80, 1400));
-        let reported = handler.dataver();
+    fn test_charge_level() {
+        let test_cases = vec![
+            ChargeLevelTestCase {
+                name: "no cell is not a battery to warn about",
+                input: None,
+                expected: BatChargeLevelEnum::OK,
+            },
+            ChargeLevelTestCase {
+                name: "20% is still OK",
+                input: reading(40, 1220),
+                expected: BatChargeLevelEnum::OK,
+            },
+            ChargeLevelTestCase {
+                name: "19.5% is a warning",
+                input: reading(39, 1219),
+                expected: BatChargeLevelEnum::Warning,
+            },
+            ChargeLevelTestCase {
+                name: "5% is still a warning",
+                input: reading(10, 1170),
+                expected: BatChargeLevelEnum::Warning,
+            },
+            ChargeLevelTestCase {
+                name: "4.5% is critical",
+                input: reading(9, 1165),
+                expected: BatChargeLevelEnum::Critical,
+            },
+        ];
 
-        handler.report(reading(79, 1380));
-        assert_ne!(handler.dataver(), reported);
-    }
-
-    #[test]
-    fn a_cell_taken_out_is_reported_as_unknown() {
-        let handler = handler();
-        handler.report(reading(80, 1400));
-        let reported = handler.dataver();
-
-        handler.report(None);
-        assert_ne!(handler.dataver(), reported);
-        assert_eq!(
-            (handler.reading.get().percent, handler.reading.get().rest_mv),
-            (None, None)
-        );
-    }
-
-    #[test]
-    fn no_cell_from_the_start_is_not_news() {
-        let handler = handler();
-        let before = handler.dataver();
-
-        handler.report(None);
-        assert_eq!(handler.dataver(), before, "the attributes are already null");
+        for ChargeLevelTestCase {
+            name,
+            input,
+            expected,
+        } in test_cases
+        {
+            let result = charge_level(input);
+            assert_eq!(result, expected, "Failed case: '{name}'");
+        }
     }
 }

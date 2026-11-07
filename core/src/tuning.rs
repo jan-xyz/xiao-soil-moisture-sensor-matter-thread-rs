@@ -102,6 +102,11 @@ pub const BATTERY_PRESENT_MIN_MV: u32 = 800;
 /// How far the resting voltage must move before it is worth a report.
 pub const BATTERY_REPORT_DELTA_MV: i32 = 20;
 
+/// How far the charge must move before it is worth a report, in half-percent
+/// units. [`BATTERY_CURVE`] is steep between 1200 and 1300 mV, so a change below
+/// [`BATTERY_REPORT_DELTA_MV`] there can still be more than ten percent.
+pub const BATTERY_REPORT_DELTA_HALF_PERCENT: u8 = 10;
+
 // --- Button -----------------------------------------------------------------
 
 /// A press shorter than this is a contact glitch, not a gesture.
@@ -264,61 +269,3 @@ pub const SLEEP_SETTLE: Millis = Millis::from_millis(500);
 /// Never sleep for less than this: the reboot a wake-up costs is worth more
 /// than a shorter sleep saves.
 pub const SLEEP_MIN: Millis = Millis::from_millis(1_000);
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::math::battery_permille;
-
-    struct TestCase {
-        name: &'static str,
-        input_mv: i32,
-        expected_permille: u32,
-    }
-
-    #[test]
-    fn test_battery_curve() {
-        let test_cases = vec![
-            TestCase {
-                name: "a fresh lithium cell reads full",
-                input_mv: 1800,
-                expected_permille: 1000,
-            },
-            TestCase {
-                name: "a fresh alkaline cell reads full",
-                input_mv: 1600,
-                expected_permille: 1000,
-            },
-            TestCase {
-                name: "a rested full NiMH cell reads full",
-                input_mv: 1350,
-                expected_permille: 1000,
-            },
-            TestCase {
-                name: "the end of the NiMH plateau is already a warning",
-                input_mv: 1200,
-                expected_permille: 100,
-            },
-            TestCase {
-                name: "an alkaline cell with a little left is already critical",
-                input_mv: 1150,
-                expected_permille: 30,
-            },
-            TestCase {
-                name: "below the knee of every chemistry reads empty",
-                input_mv: 1050,
-                expected_permille: 0,
-            },
-        ];
-
-        for TestCase {
-            name,
-            input_mv,
-            expected_permille,
-        } in test_cases
-        {
-            let result = battery_permille(input_mv, &BATTERY_CURVE);
-            assert_eq!(result, expected_permille, "Failed case: '{name}'");
-        }
-    }
-}

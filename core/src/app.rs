@@ -370,7 +370,7 @@ fn estimate_battery(rest_mv: u32) -> Option<BatteryReading> {
 
     // Rounded down, so the reported charge is never more than the curve's.
     Some(BatteryReading {
-        percent: (permille / 10) as u8,
+        half_percent: (permille / 5) as u8,
         rest_mv,
     })
 }
@@ -719,7 +719,7 @@ mod tests {
                 name: "at the threshold is a cell, and an empty one",
                 input_mv: tuning::BATTERY_PRESENT_MIN_MV,
                 expected: Some(BatteryReading {
-                    percent: 0,
+                    half_percent: 0,
                     rest_mv: tuning::BATTERY_PRESENT_MIN_MV,
                 }),
             },

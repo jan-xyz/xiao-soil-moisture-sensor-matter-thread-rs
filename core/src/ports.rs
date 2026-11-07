@@ -20,7 +20,10 @@ use crate::tuning;
 /// One battery estimate, from one reading of the cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BatteryReading {
-    pub percent: u8,
+    /// The charge left, in half-percent units: 0-200 for 0-100%. That is the
+    /// unit of the `BatPercentRemaining` attribute, so no resolution is lost
+    /// on the way to it.
+    pub half_percent: u8,
     pub rest_mv: u32,
 }
 

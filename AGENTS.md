@@ -84,6 +84,8 @@ scripts/           the firmware-size helper behind `make size`
   Matter factory reset must not force a recalibration, or the other way round.
 - **`bat_percent_remaining` is in half-percent units** (0-200 for 0-100%). It is
   easy to get wrong and invisible until a controller shows double the charge.
+  `BatteryReading::half_percent` carries that unit from the estimate on, so
+  nothing may double it.
 - **Every wait of the boot loop goes through `Ports::next_event` or
   `Ports::delay`.** That is where the device layer feeds the hardware watchdog.
   A new wait that bypasses both, or a stretch of work longer than

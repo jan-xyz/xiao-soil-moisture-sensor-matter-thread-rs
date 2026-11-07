@@ -62,6 +62,7 @@ pub fn should_report(last_reported: Option<u32>, current: u32, min_delta: u32) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tuning;
 
     struct SoilTestCase {
         name: &'static str,
@@ -190,6 +191,42 @@ mod tests {
                 input_mv: 1200,
                 input_curve: &[(1000, 0), (1200, 300), (1200, 500), (1500, 1000)],
                 expected: 500,
+            },
+            BatteryTestCase {
+                name: "a fresh lithium cell reads full",
+                input_mv: 1800,
+                input_curve: &tuning::BATTERY_CURVE,
+                expected: 1000,
+            },
+            BatteryTestCase {
+                name: "a fresh alkaline cell reads full",
+                input_mv: 1600,
+                input_curve: &tuning::BATTERY_CURVE,
+                expected: 1000,
+            },
+            BatteryTestCase {
+                name: "a rested full NiMH cell reads full",
+                input_mv: 1350,
+                input_curve: &tuning::BATTERY_CURVE,
+                expected: 1000,
+            },
+            BatteryTestCase {
+                name: "the end of the NiMH plateau is already a warning",
+                input_mv: 1200,
+                input_curve: &tuning::BATTERY_CURVE,
+                expected: 100,
+            },
+            BatteryTestCase {
+                name: "an alkaline cell with a little left is already critical",
+                input_mv: 1150,
+                input_curve: &tuning::BATTERY_CURVE,
+                expected: 30,
+            },
+            BatteryTestCase {
+                name: "below the knee of every chemistry reads empty",
+                input_mv: 1050,
+                input_curve: &tuning::BATTERY_CURVE,
+                expected: 0,
             },
         ];
 

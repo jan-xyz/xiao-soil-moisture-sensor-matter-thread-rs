@@ -39,7 +39,9 @@ board.
 The lithium cell is the case the voltage cannot handle: it reads as full until
 shortly before it is empty.
 
-The value is rounded down to whole percent.
+The value is rounded down to half a percent, the resolution of
+`BatPercentRemaining`. `BatteryReading::half_percent` carries it in that unit
+all the way, so nothing has to double it on the way out.
 
 ## No cell
 

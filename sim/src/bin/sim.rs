@@ -89,7 +89,10 @@ fn main() {
         .map(|estimate| estimate.reading)
     {
         Some(Some(reading)) => {
-            println!("battery estimate: {}% left", reading.percent);
+            println!(
+                "battery estimate: {:.1}% left",
+                f32::from(reading.half_percent) / 2.0
+            );
         }
         Some(None) => println!("battery estimate: unknown, no cell"),
         None => {}

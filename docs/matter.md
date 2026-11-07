@@ -29,6 +29,13 @@ Both handlers only report when a reading has moved by at least
 thing they reported. Below that, the reading is jitter, and reporting it would
 wake the radio for nothing.
 
+The battery handler also reports when the charge moved by
+`BATTERY_REPORT_DELTA_HALF_PERCENT` (10, so 5%) or the charge level changed. The
+battery curve is steep between 1200 and 1300 mV, so a change inside the voltage
+deadband can be more than ten percent and can cross the 20% warning threshold.
+A report names all four attributes a reading sets: the percent, the voltage,
+the charge level and the replacement flag.
+
 The comparison is against the last *reported* value rather than the previous
 sample, so a slow trend accumulates until it crosses the threshold while
 single-sample noise still does not get through.
