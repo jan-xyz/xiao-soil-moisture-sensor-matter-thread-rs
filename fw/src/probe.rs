@@ -5,11 +5,12 @@
 //! value" capability the decision layer asks for.
 
 use embassy_time::{Duration, Timer};
-use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcChannel, AdcPin};
-use esp_hal::ledc::channel::{Channel, ChannelIFace};
-use esp_hal::peripherals::ADC1;
-use esp_hal::Async;
-
+use esp_hal::{
+    analog::adc::{Adc, AdcCalCurve, AdcChannel, AdcPin},
+    ledc::channel::{Channel, ChannelIFace},
+    peripherals::ADC1,
+    Async,
+};
 use soil_sensor_core::tuning::{
     SOIL_EXCITATION_DUTY_PCT, SOIL_EXCITATION_SETTLE, SOIL_SAMPLE_COUNT, SOIL_SAMPLE_GAP,
 };
@@ -42,7 +43,11 @@ where
 
         let mut sum = 0u32;
         for _ in 0..SOIL_SAMPLE_COUNT {
-            sum += u32::from(adc.read_oneshot(&mut self.pin).await.unwrap());
+            let sample = adc
+                .read_oneshot(&mut self.pin)
+                .await
+                .unwrap_or_else(|e| panic!("Soil ADC read failed: {e:?}"));
+            sum += u32::from(sample);
             Timer::after(Duration::from_millis(SOIL_SAMPLE_GAP.as_millis())).await;
         }
 

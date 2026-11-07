@@ -10,6 +10,8 @@
 //! Both currents are battery-side, so the boost converter's overhead is
 //! inside the awake figure.
 
+use std::time::Duration;
+
 /// Measured with a multimeter in series with the cell: ~100 mA while the
 /// device is awake and online. That is the *battery-side* figure - the
 /// carrier's boost converter from the 1.5 V cell draws ~100 mA to deliver
@@ -45,13 +47,24 @@ pub const AA_CAPACITY_MAH: f64 = 2500.0;
 /// the conservative side of wrong.
 pub const PROTOCOL_AWAKE_MS_PER_BOOT: u64 = 5_150;
 
+/// Milliseconds as `f64`. `Duration` does the conversion, because a plain
+/// `as` cast from `u64` can round, and clippy rejects it for that.
+fn ms_f64(ms: u64) -> f64 {
+    Duration::from_millis(ms).as_secs_f64() * 1_000.0
+}
+
+/// How a run split into awake and asleep time.
 #[derive(Clone, Copy, Debug)]
 pub struct Energy {
+    /// Awake time, including the protocol stack's assumed share of each boot.
     pub awake_ms: u64,
+    /// Time in deep sleep.
     pub asleep_ms: u64,
 }
 
 impl Energy {
+    /// The energy of everything `world` has run so far.
+    #[must_use]
     pub fn from_world(world: &super::World) -> Self {
         Self {
             awake_ms: world.awake_ms() + PROTOCOL_AWAKE_MS_PER_BOOT * world.boot_count() as u64,
@@ -59,31 +72,36 @@ impl Energy {
         }
     }
 
+    /// The length of the run.
+    #[must_use]
     pub fn total_ms(&self) -> u64 {
         self.awake_ms + self.asleep_ms
     }
 
     /// The fraction of the time the device was awake.
+    #[must_use]
     pub fn awake_fraction(&self) -> f64 {
         match self.total_ms() {
             0 => 0.0,
-            total => self.awake_ms as f64 / total as f64,
+            total => ms_f64(self.awake_ms) / ms_f64(total),
         }
     }
 
     /// Average current over the run, in microamps.
+    #[must_use]
     pub fn average_ua(&self) -> f64 {
         match self.total_ms() {
             0 => 0.0,
             total => {
-                let awake_ms = self.awake_ms as f64;
-                let asleep_ms = self.asleep_ms as f64;
-                (awake_ms * AWAKE_MA * 1_000.0 + asleep_ms * ASLEEP_UA) / total as f64
+                let awake_ms = ms_f64(self.awake_ms);
+                let asleep_ms = ms_f64(self.asleep_ms);
+                (awake_ms * AWAKE_MA * 1_000.0 + asleep_ms * ASLEEP_UA) / ms_f64(total)
             }
         }
     }
 
     /// How long a cell of `capacity_mah` would last at that average current.
+    #[must_use]
     pub fn life_years(&self, capacity_mah: f64) -> f64 {
         let average_ua = self.average_ua();
         if average_ua <= 0.0 {
@@ -94,15 +112,16 @@ impl Energy {
     }
 
     /// A one-line summary, for the command-line tool.
+    #[must_use]
     pub fn summary(&self) -> String {
-        let days = self.total_ms() as f64 / 86_400_000.0;
+        let days = ms_f64(self.total_ms()) / 86_400_000.0;
         format!(
             "{:.1} simulated days | awake {:.2} h ({:.3}%) | asleep {:.1} h | \
              average {:.1} uA | ~{:.1} years on a {:.0} mAh AA",
             days,
-            self.awake_ms as f64 / 3_600_000.0,
+            ms_f64(self.awake_ms) / 3_600_000.0,
             self.awake_fraction() * 100.0,
-            self.asleep_ms as f64 / 3_600_000.0,
+            ms_f64(self.asleep_ms) / 3_600_000.0,
             self.average_ua(),
             self.life_years(AA_CAPACITY_MAH),
             AA_CAPACITY_MAH,

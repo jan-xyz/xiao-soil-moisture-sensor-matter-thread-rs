@@ -12,10 +12,13 @@
 
 use log::{info, warn};
 
-use crate::led::{Color, LedCommand};
-use crate::ports::{Calibration, Ports};
-use crate::tuning;
+use crate::{
+    led::{Color, LedCommand},
+    ports::{Calibration, Ports},
+    tuning,
+};
 
+/// Why a calibration was not taken over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CalibrationError {
     /// The two references were not far enough apart to be a calibration.
@@ -24,9 +27,12 @@ pub enum CalibrationError {
     PersistFailed,
 }
 
+/// How a calibration flow ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CalibrationOutcome {
+    /// The new references, stored and in effect from now on.
     Accepted(Calibration),
+    /// The old references stay in effect.
     Rejected(CalibrationError),
 }
 
@@ -69,5 +75,5 @@ async fn capture<P: Ports>(ports: &mut P, color: Color) -> i32 {
         period: tuning::SOIL_CAL_BLINK_PERIOD,
     });
     ports.delay(tuning::SOIL_CAL_HOLD).await;
-    ports.read_soil_mv().await as i32
+    i32::try_from(ports.read_soil_mv().await).unwrap_or(i32::MAX)
 }

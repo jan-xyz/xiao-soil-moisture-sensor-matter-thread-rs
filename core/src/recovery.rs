@@ -9,9 +9,7 @@
 //! The device layer keeps the count of crashed boots in memory that survives a
 //! reset; this module decides what the count means.
 
-use crate::ports::WakeCause;
-use crate::time::Millis;
-use crate::tuning;
+use crate::{ports::WakeCause, time::Millis, tuning};
 
 /// How a boot starts, given the boots before it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,6 +26,7 @@ pub struct Recovery {
 
 /// `crashed_boots` is how many boots in a row before this one crashed.
 /// `host_reset` is a reset that the USB host asked for.
+#[must_use]
 pub fn recover(crashed_boots: u32, wake: WakeCause, host_reset: bool) -> Recovery {
     // Flashing the firmware or attaching a monitor resets the chip over USB,
     // and the boot it cuts short never reaches a planned end. That is not a

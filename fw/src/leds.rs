@@ -6,13 +6,16 @@
 //! is high.
 
 use embassy_executor::task;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::{Channel, Receiver, Sender};
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex,
+    channel::{Channel, Receiver, Sender},
+};
 use embassy_time::{Duration, Timer};
 use esp_hal::gpio::Output;
-
-use soil_sensor_core::led::{Color, LedCommand};
-use soil_sensor_core::time::Millis;
+use soil_sensor_core::{
+    led::{Color, LedCommand},
+    time::Millis,
+};
 
 const LED_QUEUE_DEPTH: usize = 4;
 pub type LedChannel = Channel<CriticalSectionRawMutex, LedCommand, LED_QUEUE_DEPTH>;
@@ -82,5 +85,5 @@ impl<'d> StatusLeds<'d> {
 /// even exists.
 #[task]
 pub async fn run(leds: StatusLeds<'static>, commands: LedReceiver<'static>) {
-    leds.run(commands).await
+    leds.run(commands).await;
 }

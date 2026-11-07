@@ -6,18 +6,20 @@
 
 /// Linear interpolation between the wet (low mV) and dry (high mV)
 /// soil-probe calibration references, clamped to 0-100%.
+#[must_use]
 pub fn soil_moisture_percent(mv: i32, dry_mv: i32, wet_mv: i32) -> u8 {
     let span = dry_mv - wet_mv;
     if span <= 0 {
         return 0;
     }
     let pct = 100 * (dry_mv - mv) / span;
-    pct.clamp(0, 100) as u8
+    u8::try_from(pct.clamp(0, 100)).unwrap_or(0)
 }
 
 /// The charge left in a cell at resting voltage `mv`, in permille, read off
 /// `curve`: (millivolts, permille) points in rising order, joined by straight
 /// lines and clamped at both ends.
+#[must_use]
 pub fn battery_permille(mv: i32, curve: &[(i32, u32)]) -> u32 {
     let (Some(&(lowest_mv, lowest)), Some(&(highest_mv, highest))) = (curve.first(), curve.last())
     else {
@@ -33,18 +35,16 @@ pub fn battery_permille(mv: i32, curve: &[(i32, u32)]) -> u32 {
     curve
         .windows(2)
         .find(|pair| mv < pair[1].0)
-        .map(|pair| {
+        .map_or(highest, |pair| {
             let ((from_mv, from), (to_mv, to)) = (pair[0], pair[1]);
             let span_mv = i64::from(to_mv) - i64::from(from_mv);
             if span_mv <= 0 {
                 return from;
             }
             let rise = i64::from(to) - i64::from(from);
-            let offset = (i64::from(from) + rise * (i64::from(mv) - i64::from(from_mv)) / span_mv)
-                .clamp(0, i64::from(u32::MAX));
-            offset as u32
+            let offset = i64::from(from) + rise * (i64::from(mv) - i64::from(from_mv)) / span_mv;
+            u32::try_from(offset.clamp(0, i64::from(u32::MAX))).unwrap_or(u32::MAX)
         })
-        .unwrap_or(highest)
 }
 
 /// Whether a new reading moved far enough from the last *reported* one to be
@@ -52,6 +52,7 @@ pub fn battery_permille(mv: i32, curve: &[(i32, u32)]) -> u32 {
 /// lets a slow trend accumulate until it crosses `min_delta`, while jitter
 /// below `min_delta` still does not wake the radio. The first reading always
 /// reports.
+#[must_use]
 pub fn should_report(last_reported: Option<u32>, current: u32, min_delta: u32) -> bool {
     match last_reported {
         Some(last_reported) => last_reported.abs_diff(current) >= min_delta,

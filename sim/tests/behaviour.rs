@@ -4,12 +4,12 @@
 //! that only moves when the code asks, sensors that say what the test wants, and
 //! a reboot that is just another loop iteration.
 
-use soil_sensor_core::led::{Color, LedCommand};
-use soil_sensor_core::ports::{OperatingMode, Outcome, WakeCause};
-use soil_sensor_core::tuning;
-
-use soil_sensor_sim::energy::Energy;
-use soil_sensor_sim::{BootRecord, Script, World};
+use soil_sensor_core::{
+    led::{Color, LedCommand},
+    ports::{OperatingMode, Outcome, WakeCause},
+    tuning,
+};
+use soil_sensor_sim::{energy::Energy, BootRecord, Script, World};
 
 const MINUTE: u64 = 60_000;
 const HOUR: u64 = 60 * MINUTE;
@@ -37,7 +37,7 @@ fn a_long_idle_boot_samples_once_and_then_sleeps() {
                 "a long-idle device sleeps for about its idle period, got {for_ms} ms"
             );
         }
-        other => panic!("expected a sleep, got {other:?}"),
+        other @ Outcome::FactoryReset => panic!("expected a sleep, got {other:?}"),
     }
 }
 
@@ -210,7 +210,7 @@ fn a_press_keeps_the_boot_awake_while_the_gesture_is_in_progress() {
 
     let awake = match outcome {
         Outcome::Sleep { .. } => world.boots().first().expect("one boot").awake_ms,
-        other => panic!("expected a sleep eventually, got {other:?}"),
+        other @ Outcome::FactoryReset => panic!("expected a sleep eventually, got {other:?}"),
     };
     assert!(
         awake > tuning::ACTIVE_HOLD.as_millis() + tuning::SLEEP_SETTLE.as_millis() + 1_000,
@@ -408,7 +408,7 @@ fn boots_after_the_first_are_woken_by_the_sleep_timer() {
     world.run_until(8 * HOUR);
 
     let wakes: Vec<WakeCause> = world.boots().iter().skip(1).map(|b| b.wake).collect();
-    assert!(!wakes.is_empty());
+    assert_ne!(wakes, [] as [soil_sensor_core::ports::WakeCause; 0]);
     assert!(
         wakes.iter().all(|wake| *wake == WakeCause::Timer),
         "with no button in the script, every wake is the sleep timer"

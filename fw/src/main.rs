@@ -15,64 +15,69 @@
 #![no_main]
 #![recursion_limit = "256"]
 
-use core::pin::pin;
+use core::{cell::RefCell, pin::pin};
 
-use core::cell::RefCell;
 use embassy_executor::Spawner;
 use embassy_futures::select::{select3, Either3};
-
-use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
-use embassy_sync::channel::Channel;
-
+use embassy_sync::{blocking_mutex::Mutex as BlockingMutex, channel::Channel};
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
 use esp_bootloader_esp_idf::partitions::{
     read_partition_table, DataPartitionSubType, PartitionType, PARTITION_TABLE_MAX_LEN,
 };
-use esp_hal::analog::adc::{Adc, AdcCalCurve, AdcConfig, Attenuation};
-use esp_hal::flash::{Config as FlashConfig, Flash};
-use esp_hal::gpio::{Flex, InputConfig, Level, Output, OutputConfig, Pull};
-use esp_hal::ledc::channel::{self, ChannelIFace};
-use esp_hal::ledc::timer::{self, TimerIFace};
-use esp_hal::ledc::{LSGlobalClkSource, Ledc, LowSpeed};
-use esp_hal::ram;
-use esp_hal::rtc_cntl::sleep::{LowPower, RtcSleepConfig};
-use esp_hal::rtc_cntl::{wakeup_cause, Rtc, RwdtStage, SocResetReason, WakeupSource};
-use esp_hal::timer::timg::TimerGroup;
+use esp_hal::{
+    analog::adc::{Adc, AdcCalCurve, AdcConfig, Attenuation},
+    flash::{Config as FlashConfig, Flash},
+    gpio::{Flex, InputConfig, Level, Output, OutputConfig, Pull},
+    ledc::{
+        channel::{self, ChannelIFace},
+        timer::{self, TimerIFace},
+        LSGlobalClkSource, Ledc, LowSpeed,
+    },
+    ram,
+    rtc_cntl::{
+        sleep::{LowPower, RtcSleepConfig},
+        wakeup_cause, Rtc, RwdtStage, SocResetReason, WakeupSource,
+    },
+    timer::timg::TimerGroup,
+};
 use esp_metadata_generated::memory_range;
-
 use log::{info, warn};
-
-use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
-use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
-use rs_matter_embassy::matter::dm::clusters::decl::soil_measurement::ClusterHandler as _;
-use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
-use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{
-    ClusterHandler as _, IcdModeConfig, LitIcd, LitIcdMgmtHandler,
+use rs_matter_embassy::{
+    matter::{
+        clusters,
+        crypto::{default_crypto, Crypto, Rng},
+        devices,
+        dm::{
+            clusters::{
+                basic_info::BasicInfoConfig,
+                decl::soil_measurement::ClusterHandler as _,
+                desc::{self, ClusterHandler as _},
+                icd_mgmt::{ClusterHandler as _, IcdModeConfig, LitIcd, LitIcdMgmtHandler},
+            },
+            devices::{
+                test::{DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET},
+                DEV_TYPE_ROOT_NODE,
+            },
+            endpoints::ROOT_ENDPOINT_ID,
+            Async, Cluster, Dataver, EmptyHandler, Endpoint, Node,
+        },
+        utils::init::InitMaybeUninit,
+        BasicCommData, BootReason,
+    },
+    persist::SeqMapKvBlobStore,
+    rand::{rand_core::SeedableRng, ChaCha12Rng},
+    wireless::{esp::EspThreadRadio, EmbassyThread, EmbassyThreadMatterStack},
 };
-use rs_matter_embassy::matter::dm::devices::test::{
-    DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
+use soil_sensor_core::{
+    app::{run_boot, run_wake, Boot},
+    ports::{ButtonEdge, Outcome, Ports as _, WakeCause},
+    recovery::recover,
+    tuning,
 };
-use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ROOT_NODE;
-use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
-use rs_matter_embassy::matter::dm::{Async, Cluster, Dataver, EmptyHandler, Endpoint, Node};
-use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
-use rs_matter_embassy::matter::BootReason;
-use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
-use rs_matter_embassy::persist::SeqMapKvBlobStore;
-use rs_matter_embassy::rand::rand_core::SeedableRng;
-use rs_matter_embassy::rand::ChaCha12Rng;
-use rs_matter_embassy::wireless::esp::EspThreadRadio;
-use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
-
-use soil_sensor_core::app::{run_boot, run_wake, Boot};
-use soil_sensor_core::ports::{ButtonEdge, Outcome, Ports as _, WakeCause};
-use soil_sensor_core::recovery::recover;
-use soil_sensor_core::tuning;
 use soil_sensor_node::{
     BatteryCell, PowerSourceHandler, SoilMeasurementHandler, SoilMoistureCell, DEV_TYPE_SOIL_SENSOR,
 };
-
 use tinyrlibc as _;
 
 extern crate alloc;
@@ -123,7 +128,7 @@ const SOIL_ENDPOINT_ID: u16 = 1;
 
 /// The advertised `SAI`/`SII` (session active/idle intervals) *and* the polling
 /// intervals of the Thread Sleepy End Device: the protocol stack's ICD state
-/// machine feeds them to the driver, which maps them onto the OpenThread
+/// machine feeds them to the driver, which maps them onto the `OpenThread`
 /// data-poll period. `SII` is the long-idle interval; the stack caps it to the
 /// short-idle poll (and advertises that) while the device operates as one.
 ///
@@ -154,7 +159,7 @@ fn serial_no_from_efuse() -> &'static str {
         buf[i * 2] = HEX[(byte >> 4) as usize];
         buf[i * 2 + 1] = HEX[(byte & 0x0f) as usize];
     }
-    core::str::from_utf8(buf).unwrap()
+    core::str::from_utf8(buf).unwrap_or_else(|e| panic!("Hex digits are ASCII: {e:?}"))
 }
 
 /// The Matter answer to "why did this boot happen", from the chip's reset
@@ -165,12 +170,11 @@ fn boot_reason(reset: Option<SocResetReason>) -> BootReason {
     use SocResetReason::{ChipPowerOn, CoreDeepSleep, CoreRtcWdt, CoreSw, Cpu0Sw, SysRtcWdt};
 
     match reset {
-        Some(CoreDeepSleep) => BootReason::Unspecified,
+        Some(CoreDeepSleep) | None => BootReason::Unspecified,
         Some(ChipPowerOn) => BootReason::PowerOnReboot,
         Some(CoreSw | Cpu0Sw) => BootReason::SoftwareReset,
         Some(CoreRtcWdt | SysRtcWdt) => BootReason::HardwareWatchdogReset,
         Some(_) => BootReason::SoftwareWatchdogReset,
-        None => BootReason::Unspecified,
     }
 }
 
@@ -220,7 +224,7 @@ const ROOT_ENDPOINT: Endpoint<'static> = Endpoint {
 /// tuning.
 const ICD_MODE: IcdModeConfig = IcdModeConfig {
     idle_mode_duration_s: tuning::LIT_IDLE_MODE_DURATION_SECS,
-    active_mode_duration_ms: tuning::ACTIVE_HOLD.as_millis() as u32,
+    active_mode_duration_ms: tuning::ACTIVE_MODE_DURATION_MS,
     active_mode_threshold_ms: tuning::ACTIVE_THRESHOLD_MS,
     user_active_mode_trigger_hint: 0,
     user_active_mode_trigger_instruction: "",
@@ -309,7 +313,10 @@ async fn main(s: Spawner) {
         // the button as held and ends the boot in a factory reset.
         let _ = EDGE_CHANNEL.sender().try_send(ButtonEdge::Rising);
     }
-    s.spawn(button::run(button_input, EDGE_CHANNEL.sender()).unwrap());
+    s.spawn(
+        button::run(button_input, EDGE_CHANNEL.sender())
+            .unwrap_or_else(|e| panic!("Button task spawn failed: {e:?}")),
+    );
 
     // One yield, here on purpose: `main` holds the executor from its first
     // instruction until its first await, and everything before that point is
@@ -360,14 +367,17 @@ async fn main(s: Spawner) {
         esp_hal::rng::TrngSource::new(peripherals.RNG.reborrow(), peripherals.ADC1.reborrow());
     let mut seed = [0u8; 32];
     {
-        let trng = esp_hal::rng::Trng::try_new().unwrap();
+        let trng = esp_hal::rng::Trng::try_new()
+            .unwrap_or_else(|e| panic!("True random number generator init failed: {e:?}"));
         trng.read(&mut seed);
     }
     core::mem::drop(trng_source);
 
     let crypto = default_crypto(ChaCha12Rng::from_seed(seed), DAC_PRIVKEY);
 
-    let mut weak_rand = crypto.weak_rand().unwrap();
+    let mut weak_rand = crypto
+        .weak_rand()
+        .unwrap_or_else(|e| panic!("Weak random number generator init failed: {e:?}"));
     let discriminator = (weak_rand.next_u32() & 0xfff) as u16;
 
     // Must be stable across reboots: Thread's SRP client registers services
@@ -380,12 +390,12 @@ async fn main(s: Spawner) {
     let mut adc_config = AdcConfig::new();
     let battery_pin = adc_config
         .enable_pin_with_cal::<_, AdcCalCurve<_>>(peripherals.GPIO0.reborrow(), Attenuation::_11dB)
-        .unwrap();
+        .unwrap_or_else(|e| panic!("Battery ADC pin init failed: {e:?}"));
     let soil_pin = adc_config
         .enable_pin_with_cal::<_, AdcCalCurve<_>>(peripherals.GPIO1.reborrow(), Attenuation::_11dB)
-        .unwrap();
+        .unwrap_or_else(|e| panic!("Soil ADC pin init failed: {e:?}"));
     let adc = Adc::new(peripherals.ADC1.reborrow(), adc_config)
-        .unwrap()
+        .unwrap_or_else(|e| panic!("ADC init failed: {e:?}"))
         .into_async();
 
     // Excitation PWM for the soil probe, idle (0% duty) until a measurement is
@@ -401,7 +411,7 @@ async fn main(s: Spawner) {
             clock_source: timer::LSClockSource::APBClk,
             frequency: esp_hal::time::Rate::from_khz(tuning::SOIL_EXCITATION_FREQ_KHZ),
         })
-        .unwrap();
+        .unwrap_or_else(|e| panic!("Excitation timer config failed: {e:?}"));
     let mut excitation_channel =
         ledc.channel(channel::Number::Channel0, peripherals.GPIO21.reborrow());
     excitation_channel
@@ -410,7 +420,7 @@ async fn main(s: Spawner) {
             duty_pct: 0,
             drive_mode: esp_hal::gpio::DriveMode::PushPull,
         })
-        .unwrap();
+        .unwrap_or_else(|e| panic!("Excitation channel config failed: {e:?}"));
 
     let soil_probe = SoilProbe::new(excitation_channel, soil_pin);
     let battery = Battery::new(battery_pin);
@@ -426,7 +436,10 @@ async fn main(s: Spawner) {
     // protocol stack exists, and a blink outlives the moment that asked for
     // it, which is why this is a spawned task and not a future under the boot
     // loop's select.
-    s.spawn(leds::run(status_leds, LED_CHANNEL.receiver()).unwrap());
+    s.spawn(
+        leds::run(status_leds, LED_CHANNEL.receiver())
+            .unwrap_or_else(|e| panic!("LED task spawn failed: {e:?}")),
+    );
 
     // Flash: one physical peripheral, shared between the protocol stack's own
     // persistence and the calibration store (see `flash.rs`). The partition
@@ -435,21 +448,28 @@ async fn main(s: Spawner) {
     // left when it takes the peripheral itself.
     let mut pt_buf = [0u8; PARTITION_TABLE_MAX_LEN];
     let pt = {
-        let mut flash = Flash::new(peripherals.FLASH.reborrow(), FlashConfig::default()).unwrap();
-        read_partition_table(&mut flash, &mut pt_buf).unwrap()
+        let mut flash = Flash::new(peripherals.FLASH.reborrow(), FlashConfig::default())
+            .unwrap_or_else(|e| panic!("Flash driver init failed: {e:?}"));
+        read_partition_table(&mut flash, &mut pt_buf)
+            .unwrap_or_else(|e| panic!("Partition table read failed: {e:?}"))
     };
 
     let flash_bus: &'static SharedFlashBus =
         mk_static!(SharedFlashBus).init_with(BlockingMutex::new(RefCell::new(FlashCell::new(
-            Flash::new(peripherals.FLASH, FlashConfig::default()).unwrap(),
+            Flash::new(peripherals.FLASH, FlashConfig::default())
+                .unwrap_or_else(|e| panic!("Flash driver init failed: {e:?}")),
         ))));
 
-    let nvs = pt
+    let Some(nvs) = pt
         .find_partition(PartitionType::Data(DataPartitionSubType::Nvs))
-        .unwrap()
-        .unwrap();
+        .unwrap_or_else(|e| panic!("Partition table search failed: {e:?}"))
+    else {
+        panic!("The partition table has no nvs partition");
+    };
 
-    let calib = pt.iter().find(|p| p.label_as_str() == "calib").unwrap();
+    let Some(calib) = pt.iter().find(|p| p.label_as_str() == "calib") else {
+        panic!("The partition table has no calib partition");
+    };
 
     // The Matter store is shared from here on: the boot loop runs while the
     // stack is still starting up, and both sides persist through it. See
@@ -573,7 +593,10 @@ async fn main(s: Spawner) {
         // borrow of the stack here, so the reset's `&mut` meets no objection.
         Err(Outcome::FactoryReset) => {
             warn!("Factory reset requested - erasing Matter fabric state and rebooting");
-            stack.reset(&crypto, (NODE, &handler), kv).await.unwrap();
+            stack
+                .reset(&crypto, (NODE, &handler), kv)
+                .await
+                .unwrap_or_else(|e| panic!("Matter factory reset failed: {e:?}"));
             store::set_crashed_boots(0);
             esp_hal::system::software_reset()
         }
@@ -586,7 +609,10 @@ async fn main(s: Spawner) {
     // runs, the BootReason event it will emit once is told why this boot
     // happened.
     stack.matter().set_boot_reason(boot_reason(reset));
-    stack.startup(&crypto, kv).await.unwrap();
+    stack
+        .startup(&crypto, kv)
+        .await
+        .unwrap_or_else(|e| panic!("Matter stack startup failed: {e:?}"));
 
     if stack.matter().has_fabrics() {
         info!(
@@ -611,7 +637,9 @@ async fn main(s: Spawner) {
             EmbassyThread::new(
                 EspThreadRadio::new(peripherals.IEEE802154.reborrow(), peripherals.BT.reborrow(),)
                     .with_rx_queue_size(board::THREAD_RX_QUEUE_SIZE),
-                crypto.rand().unwrap(),
+                crypto
+                    .rand()
+                    .unwrap_or_else(|e| panic!("Random number generator init failed: {e:?}")),
                 ieee_eui64,
                 &kv,
                 stack,
@@ -649,7 +677,9 @@ async fn main(s: Spawner) {
 
         match select3(matter, persist_resumption, run_boot(&mut esp_ports, app)).await {
             Either3::First(result) => {
-                result.unwrap();
+                if let Err(e) = result {
+                    panic!("Matter stack failed: {e:?}");
+                }
                 unreachable!("the protocol stack does not end on its own")
             }
             Either3::Second(()) => unreachable!("the resumption writer never ends"),
@@ -666,7 +696,10 @@ async fn main(s: Spawner) {
     }
 
     warn!("Factory reset requested - erasing Matter fabric state and rebooting");
-    stack.reset(&crypto, (NODE, &handler), kv).await.unwrap();
+    stack
+        .reset(&crypto, (NODE, &handler), kv)
+        .await
+        .unwrap_or_else(|e| panic!("Matter factory reset failed: {e:?}"));
     store::set_crashed_boots(0);
     esp_hal::system::software_reset()
 }

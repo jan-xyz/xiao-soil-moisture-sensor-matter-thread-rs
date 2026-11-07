@@ -12,29 +12,41 @@ use core::ops::Add;
 pub struct Millis(pub u64);
 
 impl Millis {
+    /// No time at all.
     pub const ZERO: Self = Self(0);
 
+    /// A span of `ms` milliseconds.
+    #[must_use]
     pub const fn from_millis(ms: u64) -> Self {
         Self(ms)
     }
 
+    /// A span of `s` whole seconds.
+    #[must_use]
     pub const fn from_secs(s: u64) -> Self {
         Self(s * 1000)
     }
 
+    /// The span in milliseconds.
+    #[must_use]
     pub const fn as_millis(self) -> u64 {
         self.0
     }
 
+    /// The span in whole seconds, rounded down.
+    #[must_use]
     pub const fn as_secs(self) -> u64 {
         self.0 / 1000
     }
 
+    /// The difference, or zero if `other` is longer.
+    #[must_use]
     pub const fn saturating_sub(self, other: Self) -> Self {
         Self(self.0.saturating_sub(other.0))
     }
 
     /// The larger of the two, as a duration helper for tuning floors.
+    #[must_use]
     pub const fn max(self, other: Self) -> Self {
         if self.0 >= other.0 {
             self
@@ -101,30 +113,42 @@ impl Add for Millis {
 pub struct Instant(pub u64);
 
 impl Instant {
+    /// The moment of the last power-on reset.
     pub const ZERO: Self = Self(0);
 
+    /// The moment `ms` milliseconds after [`Self::ZERO`].
+    #[must_use]
     pub const fn from_millis(ms: u64) -> Self {
         Self(ms)
     }
 
+    /// The moment `s` whole seconds after [`Self::ZERO`].
+    #[must_use]
     pub const fn from_secs(s: u64) -> Self {
         Self(s * 1000)
     }
 
+    /// Milliseconds since [`Self::ZERO`].
+    #[must_use]
     pub const fn as_millis(self) -> u64 {
         self.0
     }
 
+    /// The moment `d` later, or the last representable moment.
+    #[must_use]
     pub const fn saturating_add(self, d: Millis) -> Self {
         Self(self.0.saturating_add(d.0))
     }
 
     /// How long ago `earlier` was. Zero if `earlier` is in the future, so that
     /// a caller that has just been handed a stale instant cannot underflow.
+    #[must_use]
     pub const fn saturating_since(self, earlier: Self) -> Millis {
         Millis(self.0.saturating_sub(earlier.0))
     }
 
+    /// The moment `d` earlier, or [`Self::ZERO`].
+    #[must_use]
     pub const fn saturating_sub(self, d: Millis) -> Self {
         Self(self.0.saturating_sub(d.0))
     }

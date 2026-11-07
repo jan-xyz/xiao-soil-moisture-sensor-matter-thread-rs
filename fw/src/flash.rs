@@ -40,11 +40,9 @@
 //! An async wrapper would buy the ability to yield during long operations
 //! at the price of per-call machinery, and there is little left to overlap.
 
-use core::cell::RefCell;
-use core::fmt;
+use core::{cell::RefCell, fmt};
 
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
+use embassy_sync::blocking_mutex::{raw::NoopRawMutex, Mutex as BlockingMutex};
 use embedded_storage_async::nor_flash::{ErrorType, MultiwriteNorFlash, NorFlash, ReadNorFlash};
 use esp_bootloader_esp_idf::partitions::{Error, FlashRegion, PartitionEntry};
 use esp_hal::flash::Flash;
@@ -171,13 +169,20 @@ impl ErrorType for SharedFlash<'_, '_> {
 impl ReadNorFlash for SharedFlash<'_, '_> {
     const READ_SIZE: usize = 1;
 
-    // The bodies below have no await points, on purpose: the operations are
-    // synchronous down to the driver, so the await-less path sheds per-call
-    // overhead for the reads that still happen. See the module docs.
+    // The operations below run when the method is called, still inside the
+    // caller's poll, and return a ready future: they are synchronous down to
+    // the driver, so a future with no await points sheds per-call overhead
+    // for the reads that still happen. See the module docs.
 
-    async fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), Self::Error> {
-        self.bus
-            .lock(|cell| cell.borrow().read(self.partition, offset, bytes))
+    fn read(
+        &mut self,
+        offset: u32,
+        bytes: &mut [u8],
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        core::future::ready(
+            self.bus
+                .lock(|cell| cell.borrow().read(self.partition, offset, bytes)),
+        )
     }
 
     fn capacity(&self) -> usize {
@@ -189,14 +194,26 @@ impl NorFlash for SharedFlash<'_, '_> {
     const WRITE_SIZE: usize = 4;
     const ERASE_SIZE: usize = 4096;
 
-    async fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
-        self.bus
-            .lock(|cell| cell.borrow().erase(self.partition, from, to))
+    fn erase(
+        &mut self,
+        from: u32,
+        to: u32,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        core::future::ready(
+            self.bus
+                .lock(|cell| cell.borrow().erase(self.partition, from, to)),
+        )
     }
 
-    async fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
-        self.bus
-            .lock(|cell| cell.borrow().write(self.partition, offset, bytes))
+    fn write(
+        &mut self,
+        offset: u32,
+        bytes: &[u8],
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        core::future::ready(
+            self.bus
+                .lock(|cell| cell.borrow().write(self.partition, offset, bytes)),
+        )
     }
 }
 

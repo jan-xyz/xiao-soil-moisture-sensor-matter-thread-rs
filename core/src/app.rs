@@ -21,21 +21,25 @@
 
 use log::{info, warn};
 
-use crate::button::{ButtonEvent, ButtonFsm};
-use crate::calibration::{self, CalibrationOutcome};
-use crate::led::LedCommand;
-use crate::math::{battery_permille, soil_moisture_percent};
-use crate::ports::{
-    BatteryReading, Event, IcdState, MatterPorts, OperatingMode, Outcome, Ports, PowerMode,
-    WakeCause,
+use crate::{
+    button::{ButtonEvent, ButtonFsm},
+    calibration::{self, CalibrationOutcome},
+    led::LedCommand,
+    math::{battery_permille, soil_moisture_percent},
+    ports::{
+        BatteryReading, Event, IcdState, MatterPorts, OperatingMode, Outcome, Ports, PowerMode,
+        WakeCause,
+    },
+    time::Instant,
+    tuning,
 };
-use crate::time::Instant;
-use crate::tuning;
 
 /// What a boot needs to know about itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Boot {
+    /// Why this boot happened.
     pub wake: WakeCause,
+    /// When this boot began, on the clock of [`Ports::now`].
     pub now: Instant,
     /// The boot before this one ended without a planned end: a panic, a
     /// watchdog reset or a brown-out.
@@ -67,6 +71,7 @@ impl App {
     /// that measured against the firmware's built-in references instead of the
     /// ones a person captured is wrong in a way that looks like a sensor fault,
     /// and that is exactly the bug this signature prevents.
+    #[must_use]
     pub fn new(boot: Boot, calibration: crate::ports::Calibration) -> Self {
         Self {
             started_at: boot.now,
@@ -91,6 +96,7 @@ impl App {
     }
 
     /// The references in effect.
+    #[must_use]
     pub fn calibration(&self) -> crate::ports::Calibration {
         self.calibration
     }
@@ -215,6 +221,7 @@ impl App {
     /// Always strictly after `now`: a deadline that has already passed is one
     /// this boot has finished with, and returning it would ask the caller to
     /// wait for an instant that has gone, which is a wait nothing can end.
+    #[must_use]
     pub fn next_deadline(&self, now: Instant) -> Instant {
         let mut earliest = self.next_sample;
 
@@ -255,16 +262,17 @@ impl App {
     /// the reading that this press is holding off, and none of them may fire
     /// while the gesture is still undecided.
     fn wake_deadline(&self) -> Instant {
-        self.button
-            .next_deadline()
-            .expect("a waking press always waits for something")
+        let Some(deadline) = self.button.next_deadline() else {
+            panic!("A waking press always waits for something");
+        };
+        deadline
     }
 
     /// Take one reading of both sensors and report them.
     async fn sample<P: Ports>(&mut self, ports: &mut P, with_led: bool) {
         let soil_mv = ports.read_soil_mv().await;
         let percent = soil_moisture_percent(
-            soil_mv as i32,
+            i32::try_from(soil_mv).unwrap_or(i32::MAX),
             self.calibration.dry_mv,
             self.calibration.wet_mv,
         );
@@ -331,10 +339,9 @@ impl App {
         // period: a long-idle device polls once per idle period, and the poll
         // is what keeps it in its parent's child table.
         let poll_ms = u64::from(icd.poll_interval_ms);
-        let idle_ms = icd
-            .idle_until
-            .map(|until| until.saturating_since(ports.now()).as_millis())
-            .unwrap_or(poll_ms);
+        let idle_ms = icd.idle_until.map_or(poll_ms, |until| {
+            until.saturating_since(ports.now()).as_millis()
+        });
 
         Some(poll_ms.min(idle_ms).max(tuning::SLEEP_MIN.as_millis()))
     }
@@ -342,22 +349,20 @@ impl App {
     fn drain_button<P: Ports>(&mut self, ports: &mut P) {
         while let Some(edge) = ports.try_next_button_edge() {
             let now = ports.now();
-            match self.button.on_edge(edge, now) {
-                Some(ButtonEvent::FactoryReset) => {
-                    // Nothing to do here: the caller re-checks `is_active` and
-                    // the reset is asked for again on the next deadline.
-                    warn!("Factory reset requested while preparing to sleep");
-                }
-                Some(_) => {
-                    // A gesture completed while this boot was busy. It is not
-                    // worth acting on now - the boot is about to end - but it
-                    // must keep the boot awake.
-                }
-                None => {}
+            // Any other gesture that completed while this boot was busy is not
+            // worth acting on now - the boot is about to end - but it must
+            // keep the boot awake.
+            if self.button.on_edge(edge, now) == Some(ButtonEvent::FactoryReset) {
+                // Nothing to do here: the caller re-checks `is_active` and the
+                // reset is asked for again on the next deadline.
+                warn!("Factory reset requested while preparing to sleep");
             }
         }
     }
 }
+
+/// A full cell, in the half-percent units of [`BatteryReading`].
+const FULL_HALF_PERCENT: u8 = 200;
 
 /// The estimate from one reading. Nothing about the battery is kept between
 /// boots, so no stored state can ever be wrong.
@@ -366,11 +371,17 @@ fn estimate_battery(rest_mv: u32) -> Option<BatteryReading> {
         return None;
     }
 
-    let permille = battery_permille(rest_mv as i32, &tuning::BATTERY_CURVE);
+    let permille = battery_permille(
+        i32::try_from(rest_mv).unwrap_or(i32::MAX),
+        &tuning::BATTERY_CURVE,
+    );
 
-    // Rounded down, so the reported charge is never more than the curve's.
+    // Rounded down, so the reported charge is never more than the curve's. A
+    // curve that reads more than full still reports full.
     Some(BatteryReading {
-        half_percent: (permille / 5) as u8,
+        half_percent: u8::try_from(permille / 5).map_or(FULL_HALF_PERCENT, |half_percent| {
+            half_percent.min(FULL_HALF_PERCENT)
+        }),
         rest_mv,
     })
 }
@@ -383,9 +394,12 @@ fn estimate_battery(rest_mv: u32) -> Option<BatteryReading> {
 /// seconds of startup. What it needs from the world is [`Ports`] - a port set
 /// of this phase cannot reach the stack at all.
 ///
-/// Returns the [`App`] the operational phase continues from, or the outcome
-/// that ends the boot before the stack ever matters - a factory reset,
-/// requested by holding the button through the wake phase.
+/// Returns the [`App`] the operational phase continues from.
+///
+/// # Errors
+///
+/// The outcome that ends the boot before the stack ever matters: a factory
+/// reset, requested by holding the button through the wake phase.
 pub async fn run_wake<P: Ports>(ports: &mut P, boot: Boot) -> Result<App, Outcome> {
     // Nothing else shows a crash: the serial console is gone after the first
     // deep sleep, and the controller only sees a device that went quiet.
@@ -449,9 +463,13 @@ pub async fn run_boot<P: MatterPorts>(ports: &mut P, mut app: App) -> Outcome {
 
 #[cfg(test)]
 mod tests {
+    use core::future::Future;
+
     use super::*;
-    use crate::ports::{ButtonEdge, Calibration, IcdState};
-    use crate::time::Millis;
+    use crate::{
+        ports::{ButtonEdge, Calibration, IcdState},
+        time::Millis,
+    };
 
     /// A world that does nothing of its own accord. The test decides what time
     /// it is and what the protocol stack thinks; everything else is a no-op.
@@ -482,21 +500,22 @@ mod tests {
         fn now(&self) -> Instant {
             self.now
         }
-        async fn delay(&mut self, d: Millis) {
+        fn delay(&mut self, d: Millis) -> impl Future<Output = ()> {
             self.now = self.now + d;
+            core::future::ready(())
         }
-        async fn next_event(&mut self, _deadline: Instant) -> Event {
-            Event::Deadline
+        fn next_event(&mut self, _deadline: Instant) -> impl Future<Output = Event> {
+            core::future::ready(Event::Deadline)
         }
         fn try_next_button_edge(&mut self) -> Option<ButtonEdge> {
             None
         }
         fn send_led(&mut self, _cmd: LedCommand) {}
-        async fn read_soil_mv(&mut self) -> u32 {
-            1200
+        fn read_soil_mv(&mut self) -> impl Future<Output = u32> {
+            core::future::ready(1200)
         }
-        async fn read_battery_mv(&mut self) -> u32 {
-            1400
+        fn read_battery_mv(&mut self) -> impl Future<Output = u32> {
+            core::future::ready(1400)
         }
         fn icd(&self) -> IcdState {
             self.icd
@@ -504,11 +523,11 @@ mod tests {
         fn request_active(&mut self, _hold: Option<Millis>) {}
         fn report_soil(&mut self, _percent: u8) {}
         fn report_battery(&mut self, _reading: Option<BatteryReading>) {}
-        async fn load_calibration(&mut self) -> Calibration {
-            Calibration::DEFAULT
+        fn load_calibration(&mut self) -> impl Future<Output = Calibration> {
+            core::future::ready(Calibration::DEFAULT)
         }
-        async fn store_calibration(&mut self, _c: Calibration) -> bool {
-            true
+        fn store_calibration(&mut self, _c: Calibration) -> impl Future<Output = bool> {
+            core::future::ready(true)
         }
     }
 
@@ -558,115 +577,94 @@ mod tests {
         expected: Option<u64>,
     }
 
+    /// A long idle device a minute into a timer boot, idle for long enough to
+    /// sleep. Each case changes what it is about.
+    fn settled() -> SleepTestCase {
+        SleepTestCase {
+            name: "",
+            wake: WakeCause::Timer,
+            boot_at: Instant::ZERO,
+            now: MINUTE,
+            idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
+            icd: lit_idle(MINUTE),
+            expected: Some(u64::from(tuning::LIT_POLL_PERIOD_MS)),
+        }
+    }
+
     #[test]
     fn test_sleep_for() {
+        let idle_period = Millis::from_millis(u64::from(tuning::LIT_POLL_PERIOD_MS));
         let test_cases = vec![
             SleepTestCase {
                 name: "a settled long idle device sleeps for the idle period",
-                wake: WakeCause::Timer,
-                boot_at: Instant::ZERO,
-                now: MINUTE,
-                idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
-                icd: lit_idle(MINUTE),
-                expected: Some(u64::from(tuning::LIT_POLL_PERIOD_MS)),
+                ..settled()
             },
             SleepTestCase {
                 name: "a short idle device has to stay reachable within seconds",
-                wake: WakeCause::Timer,
-                boot_at: Instant::ZERO,
-                now: MINUTE,
-                idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
                 icd: sit_idle(MINUTE),
                 expected: None,
+                ..settled()
             },
             SleepTestCase {
                 name: "an active device never sleeps",
-                wake: WakeCause::Timer,
-                boot_at: Instant::ZERO,
-                now: MINUTE,
                 idle_since: None,
                 icd: lit_active(),
                 expected: None,
+                ..settled()
             },
             SleepTestCase {
                 name: "the settle delay lets flash writes finish",
-                wake: WakeCause::Timer,
-                boot_at: Instant::ZERO,
-                now: MINUTE,
                 idle_since: Some(MINUTE),
-                icd: lit_idle(MINUTE),
                 expected: None,
+                ..settled()
             },
             SleepTestCase {
                 name: "the press that woke the device is still going on",
                 wake: WakeCause::Button,
                 boot_at: MINUTE,
-                now: MINUTE,
-                idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
-                icd: lit_idle(MINUTE),
                 expected: None,
+                ..settled()
             },
             SleepTestCase {
                 name: "the idle period caps a longer poll interval",
-                wake: WakeCause::Timer,
-                boot_at: Instant::ZERO,
-                now: MINUTE,
-                idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
-                icd: lit_idle_polling(
-                    MINUTE,
-                    30_000_000,
-                    Millis::from_millis(u64::from(tuning::LIT_POLL_PERIOD_MS)),
-                ),
-                expected: Some(u64::from(tuning::LIT_POLL_PERIOD_MS)),
+                icd: lit_idle_polling(MINUTE, 30_000_000, idle_period),
+                ..settled()
             },
             SleepTestCase {
                 name: "a shorter poll interval wins over the idle period",
-                wake: WakeCause::Timer,
-                boot_at: Instant::ZERO,
-                now: MINUTE,
-                idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
-                icd: lit_idle_polling(
-                    MINUTE,
-                    5_000,
-                    Millis::from_millis(u64::from(tuning::LIT_POLL_PERIOD_MS)),
-                ),
+                icd: lit_idle_polling(MINUTE, 5_000, idle_period),
                 expected: Some(5_000),
+                ..settled()
             },
             SleepTestCase {
                 name: "the reboot a wake-up costs is worth more than a very short sleep",
-                wake: WakeCause::Timer,
-                boot_at: Instant::ZERO,
-                now: MINUTE,
-                idle_since: Some(MINUTE.saturating_sub(tuning::SLEEP_SETTLE)),
                 icd: lit_idle_polling(MINUTE, 1, Millis::from_millis(1)),
                 expected: Some(tuning::SLEEP_MIN.as_millis()),
+                ..settled()
             },
             SleepTestCase {
                 name: "a long idle device stuck in active mode sleeps at the cap",
-                wake: WakeCause::Timer,
-                boot_at: Instant::ZERO,
                 now: PAST_THE_CAP,
                 idle_since: None,
                 icd: lit_active(),
-                expected: Some(u64::from(tuning::LIT_POLL_PERIOD_MS)),
+                ..settled()
             },
             SleepTestCase {
                 name: "the cap is measured from the start of the boot",
-                wake: WakeCause::Timer,
                 boot_at: MINUTE,
                 now: PAST_THE_CAP,
                 idle_since: None,
                 icd: lit_active(),
                 expected: None,
+                ..settled()
             },
             SleepTestCase {
                 name: "a short idle device stays awake past the cap",
-                wake: WakeCause::Timer,
-                boot_at: Instant::ZERO,
                 now: PAST_THE_CAP,
                 idle_since: None,
                 icd: sit_idle(PAST_THE_CAP),
                 expected: None,
+                ..settled()
             },
         ];
 

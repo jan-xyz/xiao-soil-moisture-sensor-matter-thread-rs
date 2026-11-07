@@ -19,10 +19,11 @@
 //!   happening.
 
 use embassy_executor::task;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::{Channel, Receiver, Sender};
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex,
+    channel::{Channel, Receiver, Sender},
+};
 use esp_hal::gpio::{Flex, WakeupConfig};
-
 use soil_sensor_core::ports::ButtonEdge;
 
 /// Deep enough that a burst of edges can never block the task that produces
@@ -40,7 +41,7 @@ pub type EdgeReceiver<'a> = Receiver<'a, CriticalSectionRawMutex, ButtonEdge, ED
 pub async fn run(mut button: Flex<'static>, edges: EdgeSender<'static>) -> ! {
     button
         .apply_wakeup_config(&WakeupConfig::default().with_low_power_path(true))
-        .unwrap();
+        .unwrap_or_else(|e| panic!("Button wake-up config failed: {e:?}"));
 
     loop {
         if button.is_high() {

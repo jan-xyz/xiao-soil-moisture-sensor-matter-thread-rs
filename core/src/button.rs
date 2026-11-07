@@ -17,15 +17,16 @@
 //! happened. [`ButtonFsm::new`] therefore starts mid-gesture, which is what
 //! makes the factory-reset hold work at all in the long-idle profile.
 
-use crate::ports::ButtonEdge;
-use crate::time::Instant;
-use crate::tuning;
+use crate::{ports::ButtonEdge, time::Instant, tuning};
 
 /// What the user asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonEvent {
+    /// A single press: take a reading now and show it on the LEDs.
     SampleNow,
+    /// A triple click: run the calibration flow.
     Calibrate,
+    /// A long hold: erase the Matter fabric state.
     FactoryReset,
 }
 
@@ -44,6 +45,7 @@ enum State {
     Window,
 }
 
+/// Turns button edges and deadlines into the gestures of [`ButtonEvent`].
 pub struct ButtonFsm {
     state: State,
     /// When the current press began.
@@ -61,6 +63,7 @@ pub struct ButtonFsm {
 impl ButtonFsm {
     /// `held_at_boot` is true when this boot was caused by a button press, in
     /// which case the press is already in progress.
+    #[must_use]
     pub fn new(held_at_boot: bool, now: Instant) -> Self {
         let mut fsm = Self {
             state: State::Idle,
@@ -145,6 +148,7 @@ impl ButtonFsm {
     }
 
     /// When this machine next has something to do, if it does.
+    #[must_use]
     pub fn next_deadline(&self) -> Option<Instant> {
         match self.state {
             State::Debounce | State::Held | State::Window => Some(self.deadline),
@@ -155,6 +159,7 @@ impl ButtonFsm {
     /// Whether a gesture is in progress. A boot must not end while this is
     /// true: a reboot would restart the gesture's timing, and the factory-reset
     /// hold would never complete.
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.state != State::Idle
     }

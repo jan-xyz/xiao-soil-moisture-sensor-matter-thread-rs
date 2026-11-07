@@ -9,19 +9,18 @@
 
 use core::cell::RefCell;
 
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::blocking_mutex::Mutex;
-use rs_matter::dm::clusters::decl::globals::{
-    MeasurementAccuracyStructBuilder, MeasurementTypeEnum,
-};
-use rs_matter::dm::{Dataver, HandlerContext, ReadContext};
-use rs_matter::error::Error;
-use rs_matter::im::{EndptId, Percent};
-use rs_matter::tlv::{Nullable, TLVBuilderParent};
-use rs_matter::utils::sync::Signal;
-
+use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 pub use rs_matter::dm::clusters::decl::soil_measurement::*;
-
+use rs_matter::{
+    dm::{
+        clusters::decl::globals::{MeasurementAccuracyStructBuilder, MeasurementTypeEnum},
+        Dataver, HandlerContext, ReadContext,
+    },
+    error::Error,
+    im::{EndptId, Percent},
+    tlv::{Nullable, TLVBuilderParent},
+    utils::sync::Signal,
+};
 use soil_sensor_core::tuning::SOIL_REPORT_DELTA_PERCENT;
 
 /// The last-reported moisture percent, or `None` if the probe has not
@@ -31,6 +30,8 @@ use soil_sensor_core::tuning::SOIL_REPORT_DELTA_PERCENT;
 pub struct SoilMoistureCell(Mutex<CriticalSectionRawMutex, RefCell<Option<u8>>>);
 
 impl SoilMoistureCell {
+    /// A cell with nothing reported yet.
+    #[must_use]
     pub const fn new() -> Self {
         Self(Mutex::new(RefCell::new(None)))
     }
@@ -50,6 +51,7 @@ impl Default for SoilMoistureCell {
     }
 }
 
+/// The cluster handler for the Soil Measurement cluster.
 pub struct SoilMeasurementHandler<'a> {
     endpoint_id: EndptId,
     dataver: Dataver,
@@ -65,6 +67,7 @@ pub struct SoilMeasurementHandler<'a> {
 }
 
 impl<'a> SoilMeasurementHandler<'a> {
+    /// A handler for the cluster on `endpoint_id`, serving what `value` holds.
     pub const fn new(endpoint_id: EndptId, dataver: Dataver, value: &'a SoilMoistureCell) -> Self {
         Self {
             endpoint_id,
@@ -159,8 +162,9 @@ impl ClusterHandler for SoilMeasurementHandler<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use rs_matter::dm::Dataver;
+
+    use super::*;
 
     /// A handler over a cell of its own.
     ///

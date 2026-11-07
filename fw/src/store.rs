@@ -15,18 +15,20 @@
 use core::cell::RefCell;
 
 use embassy_futures::block_on;
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
+use embassy_sync::blocking_mutex::{raw::NoopRawMutex, Mutex as BlockingMutex};
 use esp_hal::ram;
-use rs_matter_embassy::matter::error::Error;
-use rs_matter_embassy::matter::persist::KvBlobStore;
-use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
-use rs_matter_embassy::persist::SeqMapKvBlobStore;
-use sequential_storage::cache::Cache;
-use sequential_storage::map::{MapConfig, MapStorage};
-
-use soil_sensor_core::ports::Calibration;
-use soil_sensor_core::tuning::{SOIL_CAL_DEFAULT_DRY_MV, SOIL_CAL_DEFAULT_WET_MV};
+use rs_matter_embassy::{
+    matter::{error::Error, persist::KvBlobStore, utils::init::InitMaybeUninit},
+    persist::SeqMapKvBlobStore,
+};
+use sequential_storage::{
+    cache::Cache,
+    map::{MapConfig, MapStorage},
+};
+use soil_sensor_core::{
+    ports::Calibration,
+    tuning::{SOIL_CAL_DEFAULT_DRY_MV, SOIL_CAL_DEFAULT_WET_MV},
+};
 
 use crate::flash::SharedFlash;
 
@@ -129,13 +131,13 @@ impl SharedKvStore {
 
     /// Runs one operation against the store.
     fn with<R>(
-        &self,
+        self,
         f: impl FnOnce(&mut SeqMapKvBlobStore<SharedFlash<'static, 'static>>) -> R,
     ) -> R {
         self.store.lock(|cell| {
-            let mut store = cell
-                .try_borrow_mut()
-                .expect("the store is never re-entered: every operation completes inside one poll");
+            let mut store = cell.try_borrow_mut().unwrap_or_else(|_| {
+                panic!("The store is never re-entered: every operation completes inside one poll")
+            });
             f(&mut store)
         })
     }

@@ -15,6 +15,7 @@ use crate::time::Millis;
 /// firmware uses the same pair, and the resolution the hardware timer can reach
 /// at this frequency is what fixes the duty step.
 pub const SOIL_EXCITATION_FREQ_KHZ: u32 = 200;
+/// The duty cycle of the excitation signal, in percent.
 pub const SOIL_EXCITATION_DUTY_PCT: u8 = 68;
 
 /// How long the probe is left to settle after the drive signal changes before
@@ -25,11 +26,13 @@ pub const SOIL_EXCITATION_SETTLE: Millis = Millis::from_millis(300);
 /// what makes a single sample trustworthy enough to report; the gap lets the
 /// analog front end recover between reads.
 pub const SOIL_SAMPLE_COUNT: u32 = 10;
+/// The pause between two of those samples.
 pub const SOIL_SAMPLE_GAP: Millis = Millis::from_millis(50);
 
 /// Dry/wet reference voltages, in millivolts. Overridden once a calibration has
 /// been stored.
 pub const SOIL_CAL_DEFAULT_DRY_MV: i32 = 1600;
+/// The wet half of the same default pair.
 pub const SOIL_CAL_DEFAULT_WET_MV: i32 = 900;
 
 /// A calibration is only accepted when dry sits this far above wet; anything
@@ -39,6 +42,7 @@ pub const SOIL_CAL_MIN_SPAN_MV: i32 = 200;
 /// The two references the calibration flow captures, and the hold time of each
 /// half of the flow.
 pub const SOIL_CAL_HOLD: Millis = Millis::from_secs(10);
+/// How long each on and each off phase of the calibration blinks lasts.
 pub const SOIL_CAL_BLINK_PERIOD: Millis = Millis::from_millis(500);
 
 /// How far a moisture reading must move before it is worth a report. Below
@@ -48,6 +52,7 @@ pub const SOIL_REPORT_DELTA_PERCENT: u8 = 2;
 
 /// Moisture classification thresholds for the status LEDs.
 pub const MOISTURE_DRY_BELOW_PERCENT: u8 = 23;
+/// Above this the soil counts as wet, between the two as normal.
 pub const MOISTURE_NORMAL_ABOVE_PERCENT: u8 = 58;
 
 /// The error signals: short, fast blinks, so they cannot be mistaken for the
@@ -55,32 +60,35 @@ pub const MOISTURE_NORMAL_ABOVE_PERCENT: u8 = 58;
 /// says which error it is (`LedCommand::crashed`,
 /// `LedCommand::calibration_rejected`).
 pub const ERROR_BLINK_COUNT: u32 = 5;
+/// How long each on and each off phase of an error blink lasts.
 pub const ERROR_BLINK_PERIOD: Millis = Millis::from_millis(100);
 
 // --- Battery ----------------------------------------------------------------
 
+/// How many readings of the cell one battery reading averages.
 pub const BATTERY_SAMPLE_COUNT: u32 = 5;
+/// The pause between two of those readings.
 pub const BATTERY_SAMPLE_GAP: Millis = Millis::from_millis(20);
 
 /// The charge left in an AA cell by its resting voltage, in permille, for any
 /// chemistry that fits the holder.
 ///
 /// No single curve fits every AA cell. An alkaline cell falls steadily from
-/// about 1.6 V. A NiMH cell starts near 1.35 V and sits flat near 1.25 V for
+/// about 1.6 V. A `NiMH` cell starts near 1.35 V and sits flat near 1.25 V for
 /// most of its life. A lithium cell sits flat near 1.5 V and then drops fast at
 /// the very end. One reading cannot tell them apart, so the curve is fitted to
 /// what matters at each end:
 ///
 /// - **At the top it is optimistic.** It reads full from the voltage of a
-///   rested full NiMH cell, the lowest of the three, so every fresh cell reads
+///   rested full `NiMH` cell, the lowest of the three, so every fresh cell reads
 ///   full.
 /// - **Towards the end it is pessimistic.** In the range where a controller
-///   warns about the battery, it stays under the alkaline and NiMH curves, so
+///   warns about the battery, it stays under the alkaline and `NiMH` curves, so
 ///   the warning comes early. A warning that comes early is a nuisance, and one
 ///   that comes late is a dead sensor.
 ///
 /// In between, an alkaline cell reads fuller than it is: at the voltage where
-/// a NiMH cell is still nearly full, an alkaline one is about half empty. The
+/// a `NiMH` cell is still nearly full, an alkaline one is about half empty. The
 /// points are typical published curves, not measurements of this board.
 ///
 /// The lithium cell is the exception at the end too: the voltage alone reads
@@ -129,7 +137,7 @@ pub const BUTTON_WAKE_HOLD: Millis = Millis::from_millis(30_000);
 pub const SAMPLE_PERIOD: Millis = Millis::from_secs(30);
 
 /// How long a counted boot - any boot except a wake from sleep, per the spec's
-/// RebootCount clause (core spec §11.12.6.2) - must run before its count is
+/// `RebootCount` clause (core spec §11.12.6.2) - must run before its count is
 /// written back, so that a boot loop does not spend flash writes.
 pub const REBOOT_COUNT_HEALTHY_AFTER: Millis = Millis::from_secs(60);
 
@@ -187,7 +195,13 @@ pub const ACTIVE_POLL_PERIOD_MS: u32 = 150;
 /// check-in exchange keeps the window alive, and a controller too slow to
 /// answer within it costs only one cycle's subscription, recovered on the
 /// next wake-up's check-in.
-pub const ACTIVE_HOLD: Millis = Millis::from_millis(1_000);
+///
+/// In milliseconds, because that is the unit of the protocol's active-mode
+/// duration. [`ACTIVE_HOLD`] is the same value as a span.
+pub const ACTIVE_MODE_DURATION_MS: u32 = 1_000;
+
+/// [`ACTIVE_MODE_DURATION_MS`] as a span.
+pub const ACTIVE_HOLD: Millis = Millis::from_millis(ACTIVE_MODE_DURATION_MS as u64);
 
 /// How much extra active time every protocol message buys, and what keeps
 /// the device up while a peer is mid-exchange with it.
@@ -201,7 +215,7 @@ pub const ACTIVE_HOLD: Millis = Millis::from_millis(1_000);
 /// the `SAT` we advertise (session parameters and DNS-SD) shrinks to 1 s, so
 /// a controller that only starts talking 1-5 s after our last message now
 /// finds us idle and waits for our next wake instead. A conformant build
-/// restores 5_000 - the attribute is fixed-quality, so this is a
+/// restores `5_000` - the attribute is fixed-quality, so this is a
 /// re-commissioning, not a runtime write.
 pub const ACTIVE_THRESHOLD_MS: u16 = 1_000;
 

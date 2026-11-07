@@ -5,10 +5,12 @@
 //! profiler. What it cannot answer is whether the silicon behaves - see
 //! `ARCHITECTURE.md`.
 
-use soil_sensor_sim::energy::{Energy, AA_CAPACITY_MAH};
-use soil_sensor_sim::{Script, World};
+use std::time::Duration;
 
-const DAY_MS: u64 = 86_400_000;
+use soil_sensor_sim::{
+    energy::{Energy, AA_CAPACITY_MAH},
+    Script, World,
+};
 
 fn main() {
     let mut days = 30.0f64;
@@ -55,7 +57,9 @@ fn main() {
         .battery(Script::ramp(1500, 1150, 400))
         .lit_at(lit_at);
 
-    world.run_until((days * DAY_MS as f64) as u64);
+    // A negative or unreadable number of days runs nothing.
+    let run_for = Duration::try_from_secs_f64(days * 86_400.0).unwrap_or(Duration::ZERO);
+    world.run_until(u64::try_from(run_for.as_millis()).unwrap_or(u64::MAX));
 
     let energy = Energy::from_world(&world);
 

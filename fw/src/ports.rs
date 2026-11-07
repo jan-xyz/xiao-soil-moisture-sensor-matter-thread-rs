@@ -15,27 +15,34 @@ use core::cell::RefCell;
 
 use embassy_futures::select::{select3, Either3};
 use embassy_time::{Duration, Timer};
-use esp_hal::analog::adc::{Adc, AdcChannel};
-use esp_hal::peripherals::ADC1;
-use esp_hal::rtc_cntl::Rtc;
-use esp_hal::Async;
-use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{Icd, IcdPowerMode, OperatingModeEnum};
-use rs_matter_embassy::matter::Matter;
-
-use soil_sensor_core::led::LedCommand;
-use soil_sensor_core::ports::{
-    BatteryReading, ButtonEdge, Calibration, Event, IcdState, MatterPorts, OperatingMode, Ports,
-    PowerMode,
+use esp_hal::{
+    analog::adc::{Adc, AdcChannel},
+    peripherals::ADC1,
+    rtc_cntl::Rtc,
+    Async,
 };
-use soil_sensor_core::time::{Instant as CoreInstant, Millis};
+use rs_matter_embassy::matter::{
+    dm::clusters::icd_mgmt::{Icd, IcdPowerMode, OperatingModeEnum},
+    Matter,
+};
+use soil_sensor_core::{
+    led::LedCommand,
+    ports::{
+        BatteryReading, ButtonEdge, Calibration, Event, IcdState, MatterPorts, OperatingMode,
+        Ports, PowerMode,
+    },
+    time::{Instant as CoreInstant, Millis},
+};
 use soil_sensor_node::{PowerSourceHandler, SoilMeasurementHandler};
 
-use crate::battery::Battery;
-use crate::button::EdgeReceiver;
-use crate::flash::SharedFlash;
-use crate::leds::LedSender;
-use crate::probe::SoilProbe;
-use crate::store::{self, SharedKvStore};
+use crate::{
+    battery::Battery,
+    button::EdgeReceiver,
+    flash::SharedFlash,
+    leds::LedSender,
+    probe::SoilProbe,
+    store::{self, SharedKvStore},
+};
 
 pub struct EspPorts<'a, 'd, SoilPin, BatPin>
 where
@@ -63,7 +70,7 @@ where
     pub boot_at: embassy_time::Instant,
 }
 
-impl<'a, 'd, SoilPin, BatPin> EspPorts<'a, 'd, SoilPin, BatPin>
+impl<'a, SoilPin, BatPin> EspPorts<'a, '_, SoilPin, BatPin>
 where
     SoilPin: AdcChannel,
     BatPin: AdcChannel,
@@ -178,12 +185,17 @@ where
         self.power_handler.report(reading);
     }
 
-    async fn load_calibration(&mut self) -> Calibration {
-        store::load_calibration(self.flash)
+    // The flash work runs when the method is called, inside the caller's
+    // poll, which is the discipline `fw/src/store.rs` needs anyway.
+    fn load_calibration(&mut self) -> impl core::future::Future<Output = Calibration> {
+        core::future::ready(store::load_calibration(self.flash))
     }
 
-    async fn store_calibration(&mut self, calibration: Calibration) -> bool {
-        store::store_calibration(self.flash, calibration)
+    fn store_calibration(
+        &mut self,
+        calibration: Calibration,
+    ) -> impl core::future::Future<Output = bool> {
+        core::future::ready(store::store_calibration(self.flash, calibration))
     }
 }
 
@@ -197,10 +209,9 @@ where
         // borrow the stack immutably for the boot's whole length, and the
         // matter future needs to reach it too. The store itself is shared
         // behind a mutex, so a call from either side is simply serialised.
-        let (matter, kv) = self
-            .matter
-            .as_ref()
-            .expect("the matter half is attached before the operational phase");
+        let Some((matter, kv)) = self.matter.as_ref() else {
+            panic!("The matter half is attached before the operational phase");
+        };
         match matter.persist_reboot_count(matter.kv(*kv)) {
             Ok(()) => log::info!("Reboot count {} persisted", matter.reboot_count()),
             Err(e) => log::warn!("Reboot count persist failed: {e:?}"),

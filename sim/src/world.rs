@@ -9,21 +9,22 @@
 //! power domain powers down, and it does not model radio timing. What it can
 //! tell you is what the device decides, and what that costs.
 
-use std::collections::VecDeque;
-
-use soil_sensor_core::led::LedCommand;
-use soil_sensor_core::ports::{
-    BatteryReading, ButtonEdge, Calibration, Event, IcdState, MatterPorts, OperatingMode, Outcome,
-    Ports, PowerMode, WakeCause,
-};
-use soil_sensor_core::time::{Instant as CoreInstant, Millis};
-use soil_sensor_core::tuning;
+use std::{collections::VecDeque, future::Future};
 
 use rs_matter::dm::Dataver;
-
-use soil_sensor_node::power_source::ClusterHandler as _;
-use soil_sensor_node::soil_measurement::ClusterHandler as _;
-use soil_sensor_node::{BatteryCell, PowerSourceHandler, SoilMeasurementHandler, SoilMoistureCell};
+use soil_sensor_core::{
+    led::LedCommand,
+    ports::{
+        BatteryReading, ButtonEdge, Calibration, Event, IcdState, MatterPorts, OperatingMode,
+        Outcome, Ports, PowerMode, WakeCause,
+    },
+    time::{Instant as CoreInstant, Millis},
+    tuning,
+};
+use soil_sensor_node::{
+    power_source::ClusterHandler as _, soil_measurement::ClusterHandler as _, BatteryCell,
+    PowerSourceHandler, SoilMeasurementHandler, SoilMoistureCell,
+};
 
 /// A repeating list of sensor readings.
 #[derive(Clone, Debug)]
@@ -33,22 +34,37 @@ pub struct Script {
 }
 
 impl Script {
+    /// A script that plays `values` in order and then starts again.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `values` is empty: a sensor always returns a reading.
     pub fn new(values: impl IntoIterator<Item = u32>) -> Self {
         let values: Vec<u32> = values.into_iter().collect();
         assert!(!values.is_empty(), "a script needs at least one reading");
         Self { values, index: 0 }
     }
 
+    /// A sensor that always reads `value`.
+    #[must_use]
     pub fn constant(value: u32) -> Self {
         Self::new([value])
     }
 
     /// A reading that walks from `from` to `to` over `steps` reads, then stays.
+    #[must_use]
     pub fn ramp(from: u32, to: u32, steps: u32) -> Self {
         let steps = steps.max(1);
-        let values = (0..=steps).map(|i| {
-            let span = i64::from(to) - i64::from(from);
-            (i64::from(from) + span * i64::from(i) / i64::from(steps)) as u32
+        let distance = from.abs_diff(to);
+        let values = (0..=steps).map(move |i| {
+            // At most `distance`, because `i` never exceeds `steps`.
+            let moved = u64::from(distance) * u64::from(i) / u64::from(steps);
+            let moved = u32::try_from(moved).unwrap_or(distance);
+            if to >= from {
+                from + moved
+            } else {
+                from - moved
+            }
         });
         Self::new(values)
     }
@@ -83,8 +99,11 @@ struct IcdModel {
 /// One boot, as the world saw it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BootRecord {
+    /// When the boot began, in virtual milliseconds since the simulation began.
     pub started_at_ms: u64,
+    /// Why the device booted.
     pub wake: WakeCause,
+    /// How the boot ended.
     pub outcome: Outcome,
     /// How long the boot stayed awake, in milliseconds.
     pub awake_ms: u64,
@@ -93,7 +112,9 @@ pub struct BootRecord {
 /// A report the decision layer asked for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Report {
+    /// When the report was made, in virtual milliseconds.
     pub at_ms: u64,
+    /// The reported soil moisture.
     pub percent: u8,
     /// The protocol stack's dataver after the call. It only moves when the
     /// reading was worth reporting, so this is where the deadband shows up.
@@ -103,10 +124,29 @@ pub struct Report {
 /// One battery estimate the decision layer made, or `None` for no cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BatteryEstimate {
+    /// When the estimate was made, in virtual milliseconds.
     pub at_ms: u64,
+    /// The estimate, or `None` for no cell.
     pub reading: Option<BatteryReading>,
 }
 
+/// What the boot was last told about the protocol stack.
+///
+/// The real stack notifies through a latching `Notification`, so a change that
+/// happens while the boot is busy is still delivered on its next wait. A
+/// simulation that dropped it would be testing a different device.
+#[derive(Clone, Copy, Debug)]
+struct IcdSeen {
+    /// The power mode, as last reported to the boot.
+    active: bool,
+    /// The operating mode, as last reported to the boot.
+    lit: bool,
+    /// Whether either has changed since the boot was last told.
+    changed: bool,
+}
+
+/// The scripted world: the clock, the durable store, the sensors and the user,
+/// and a record of everything the boots did in it.
 pub struct World {
     /// Virtual milliseconds since the simulation began.
     clock: u64,
@@ -120,15 +160,7 @@ pub struct World {
     button: VecDeque<(u64, ButtonEdge)>,
 
     icd: IcdModel,
-    /// The protocol stack's power mode, as last reported to the boot.
-    icd_active: bool,
-    /// The operating mode, as last reported to the boot.
-    operating_mode_lit: bool,
-    /// Whether that mode has changed since the boot was last told. The real
-    /// stack notifies through a latching `Notification`, so a change that
-    /// happens while the boot is busy is still delivered on its next wait -
-    /// and a simulation that dropped it would be testing a different device.
-    icd_changed: bool,
+    icd_seen: IcdSeen,
 
     /// The durable store. Survives everything, including the removal of power -
     /// the simulation never removes power, so it is simply never cleared.
@@ -156,6 +188,9 @@ pub struct World {
 }
 
 impl World {
+    /// A world where the device is a long idle one from the start, the soil
+    /// and the cell read steady values, and nobody presses the button.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             clock: 0,
@@ -169,10 +204,12 @@ impl World {
                 poll_interval_ms: tuning::LIT_POLL_PERIOD_MS,
                 stuck_active: false,
             },
-            icd_active: true,
-            operating_mode_lit: true,
-            icd_changed: false,
-            boot_limit_ms: tuning::LIT_POLL_PERIOD_MS as u64 * 4,
+            icd_seen: IcdSeen {
+                active: true,
+                lit: true,
+                changed: false,
+            },
+            boot_limit_ms: u64::from(tuning::LIT_POLL_PERIOD_MS) * 4,
             calibration: Calibration::DEFAULT,
             calibration_writes: 0,
             leds: Vec::new(),
@@ -190,6 +227,8 @@ impl World {
 
     // --- Scenario building ---------------------------------------------------
 
+    /// What the soil probe reads.
+    #[must_use]
     pub fn soil(mut self, script: Script) -> Self {
         self.soil = script;
         self
@@ -201,6 +240,8 @@ impl World {
         self.soil = script;
     }
 
+    /// What the cell reads at rest.
+    #[must_use]
     pub fn battery(mut self, script: Script) -> Self {
         self.battery = script;
         self
@@ -213,12 +254,14 @@ impl World {
     /// A boot only ends once the device is a long-idle one and idle, so a
     /// scenario that never becomes one does not finish; [`World::boot_limit`]
     /// turns that into a clear failure rather than a hang.
+    #[must_use]
     pub fn lit_at(mut self, at_ms: u64) -> Self {
         self.icd.lit_at = at_ms;
         self
     }
 
     /// Wedge the protocol stack in active mode from its startup on.
+    #[must_use]
     pub fn stuck_active(mut self) -> Self {
         self.icd.stuck_active = true;
         self
@@ -227,6 +270,7 @@ impl World {
     /// How long a single boot may last in virtual time before the simulation
     /// gives up on it. A boot that never ends means the device is staying
     /// reachable by design.
+    #[must_use]
     pub fn boot_limit(mut self, ms: u64) -> Self {
         self.boot_limit_ms = ms;
         self
@@ -235,12 +279,14 @@ impl World {
     /// Make the next boot one that follows a crash. The simulation does not
     /// crash on its own; this is what the device layer's crashed-boot count
     /// would tell the boot.
+    #[must_use]
     pub fn after_crash(mut self) -> Self {
         self.after_crash = true;
         self
     }
 
     /// Schedule a press and release at `at_ms`.
+    #[must_use]
     pub fn press(mut self, at_ms: u64, held_ms: u64) -> Self {
         self.button.push_back((at_ms, ButtonEdge::Falling));
         self.button.push_back((at_ms + held_ms, ButtonEdge::Rising));
@@ -257,9 +303,11 @@ impl World {
         // window to end. The window opens where the real stack starts - after
         // the wake phase, in `drive`.
         self.icd.active_until = u64::MAX;
-        self.icd_active = true;
-        self.icd_changed = false;
-        self.operating_mode_lit = self.clock >= self.icd.lit_at;
+        self.icd_seen = IcdSeen {
+            active: true,
+            lit: self.clock >= self.icd.lit_at,
+            changed: false,
+        };
 
         let started_at_ms = self.clock;
         let outcome = self.drive(wake);
@@ -358,60 +406,86 @@ impl World {
 
     /// Whether the device is operating as a short- or a long-idle one right
     /// now, as the world currently has it.
+    #[must_use]
     pub fn icd_mode_now(&self) -> OperatingMode {
         self.operating_mode()
     }
 
+    /// The virtual time, in milliseconds since the simulation began.
+    #[must_use]
     pub fn now_ms(&self) -> u64 {
         self.clock
     }
 
+    /// Every boot so far, in order.
+    #[must_use]
     pub fn boots(&self) -> &[BootRecord] {
         &self.boots
     }
 
+    /// How many boots have run so far.
+    #[must_use]
     pub fn boot_count(&self) -> usize {
         self.boots.len()
     }
 
+    /// How long the boots stayed awake in total, in milliseconds.
+    #[must_use]
     pub fn awake_ms(&self) -> u64 {
         self.awake_ms
     }
 
+    /// How long the device slept in total, in milliseconds.
+    #[must_use]
     pub fn asleep_ms(&self) -> u64 {
         self.asleep_ms
     }
 
+    /// Every LED command, with the virtual time it was sent.
+    #[must_use]
     pub fn leds(&self) -> &[(u64, LedCommand)] {
         &self.leds
     }
 
     /// The soil reports that actually reached the protocol stack, i.e. the ones
     /// the deadband let through.
+    #[must_use]
     pub fn soil_reports(&self) -> &[Report] {
         &self.soil_reports
     }
 
+    /// The battery estimates that actually reached the protocol stack.
+    #[must_use]
     pub fn battery_reports(&self) -> &[BatteryEstimate] {
         &self.battery_reports
     }
 
+    /// Every battery estimate, reported or not.
+    #[must_use]
     pub fn battery_estimates(&self) -> &[BatteryEstimate] {
         &self.battery_estimates
     }
 
+    /// Every request to keep the stack active, with its time and hold.
+    #[must_use]
     pub fn active_requests(&self) -> &[(u64, Option<Millis>)] {
         &self.active_requests
     }
 
+    /// The calibration in the durable store.
+    #[must_use]
     pub fn calibration(&self) -> Calibration {
         self.calibration
     }
 
+    /// How many times the calibration has been written.
+    #[must_use]
     pub fn calibration_writes(&self) -> u32 {
         self.calibration_writes
     }
 
+    /// How many times the reboot count has been written.
+    #[must_use]
     pub fn reboot_count_writes(&self) -> u32 {
         self.reboot_count_writes
     }
@@ -444,15 +518,15 @@ impl World {
     /// whether the boot has yet to hear about the change.
     fn sync_icd(&mut self) {
         let active = self.clock < self.icd.active_until;
-        if active != self.icd_active {
-            self.icd_active = active;
-            self.icd_changed = true;
+        if active != self.icd_seen.active {
+            self.icd_seen.active = active;
+            self.icd_seen.changed = true;
         }
 
         let lit = self.operating_mode() == OperatingMode::Lit;
-        if lit != self.operating_mode_lit {
-            self.operating_mode_lit = lit;
-            self.icd_changed = true;
+        if lit != self.icd_seen.lit {
+            self.icd_seen.lit = lit;
+            self.icd_seen.changed = true;
         }
     }
 
@@ -491,23 +565,15 @@ struct SimPorts<'a> {
     battery_dataver: u32,
 }
 
-impl Ports for SimPorts<'_> {
-    fn now(&self) -> CoreInstant {
-        CoreInstant::from_millis(self.world.clock - self.world.boot_at)
-    }
-
-    async fn delay(&mut self, d: Millis) {
-        // Time passes because the code asked it to, and only then.
-        self.world.clock += d.as_millis();
-        self.world.sync_icd();
-    }
-
-    async fn next_event(&mut self, deadline: CoreInstant) -> Event {
+impl SimPorts<'_> {
+    /// What [`Ports::next_event`] delivers. Nothing here waits: the clock
+    /// jumps to whatever comes first.
+    fn next_event_now(&mut self, deadline: CoreInstant) -> Event {
         // A change that happened while the boot was busy is still pending: the
         // stack's notification latches, so it is delivered on the next wait.
         self.world.sync_icd();
-        if self.world.icd_changed {
-            self.world.icd_changed = false;
+        if self.world.icd_seen.changed {
+            self.world.icd_seen.changed = false;
             return Event::Icd;
         }
 
@@ -526,8 +592,9 @@ impl Ports for SimPorts<'_> {
         self.world.clock = before.max(next);
 
         if Some(next) == button_at {
-            let (_, edge) = self.world.button.pop_front().expect("scheduled edge");
-            return Event::Button(edge);
+            if let Some((_, edge)) = self.world.button.pop_front() {
+                return Event::Button(edge);
+            }
         }
 
         if Some(next) == icd_at {
@@ -563,34 +630,49 @@ impl Ports for SimPorts<'_> {
 
         Event::Deadline
     }
+}
+
+impl Ports for SimPorts<'_> {
+    fn now(&self) -> CoreInstant {
+        CoreInstant::from_millis(self.world.clock - self.world.boot_at)
+    }
+
+    fn delay(&mut self, d: Millis) -> impl Future<Output = ()> {
+        // Time passes because the code asked it to, and only then.
+        self.world.clock += d.as_millis();
+        self.world.sync_icd();
+        core::future::ready(())
+    }
+
+    fn next_event(&mut self, deadline: CoreInstant) -> impl Future<Output = Event> {
+        core::future::ready(self.next_event_now(deadline))
+    }
 
     fn try_next_button_edge(&mut self) -> Option<ButtonEdge> {
-        match self.world.button.front() {
-            Some((at, _)) if *at <= self.world.clock => {
-                let (_, edge) = self.world.button.pop_front().expect("scheduled edge");
-                Some(edge)
-            }
-            _ => None,
-        }
+        let clock = self.world.clock;
+        self.world
+            .button
+            .pop_front_if(|(at, _)| *at <= clock)
+            .map(|(_, edge)| edge)
     }
 
     fn send_led(&mut self, cmd: LedCommand) {
         self.world.leds.push((self.world.clock, cmd));
     }
 
-    async fn read_soil_mv(&mut self) -> u32 {
+    fn read_soil_mv(&mut self) -> impl Future<Output = u32> {
         // The device layer takes real time to produce a reading, and the energy
         // budget has to see it.
         self.world.clock += tuning::SOIL_EXCITATION_SETTLE.as_millis()
             + u64::from(tuning::SOIL_SAMPLE_COUNT) * tuning::SOIL_SAMPLE_GAP.as_millis();
         self.world.sync_icd();
-        self.world.soil.next()
+        core::future::ready(self.world.soil.next())
     }
 
-    async fn read_battery_mv(&mut self) -> u32 {
+    fn read_battery_mv(&mut self) -> impl Future<Output = u32> {
         self.world.clock +=
             u64::from(tuning::BATTERY_SAMPLE_COUNT) * tuning::BATTERY_SAMPLE_GAP.as_millis();
-        self.world.battery.next()
+        core::future::ready(self.world.battery.next())
     }
 
     fn icd(&self) -> IcdState {
@@ -637,14 +719,14 @@ impl Ports for SimPorts<'_> {
         }
     }
 
-    async fn load_calibration(&mut self) -> Calibration {
-        self.world.calibration
+    fn load_calibration(&mut self) -> impl Future<Output = Calibration> {
+        core::future::ready(self.world.calibration)
     }
 
-    async fn store_calibration(&mut self, calibration: Calibration) -> bool {
+    fn store_calibration(&mut self, calibration: Calibration) -> impl Future<Output = bool> {
         self.world.calibration = calibration;
         self.world.calibration_writes += 1;
-        true
+        core::future::ready(true)
     }
 }
 

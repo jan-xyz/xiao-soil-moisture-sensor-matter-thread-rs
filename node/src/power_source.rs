@@ -20,20 +20,23 @@
 
 use core::cell::Cell;
 
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::blocking_mutex::Mutex;
-use rs_matter::dm::{ArrayAttributeRead, Cluster, Dataver, HandlerContext, ReadContext};
-use rs_matter::error::Error;
-use rs_matter::im::EndptId;
-use rs_matter::tlv::{Nullable, TLVBuilderParent, ToTLVArrayBuilder, ToTLVBuilder, Utf8StrBuilder};
-use rs_matter::utils::sync::Signal;
-use rs_matter::with;
-
+use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 pub use rs_matter::dm::clusters::decl::power_source::*;
+use rs_matter::{
+    dm::{ArrayAttributeRead, Cluster, Dataver, HandlerContext, ReadContext},
+    error::Error,
+    im::EndptId,
+    tlv::{Nullable, TLVBuilderParent, ToTLVArrayBuilder, ToTLVBuilder, Utf8StrBuilder},
+    utils::sync::Signal,
+    with,
+};
+use soil_sensor_core::{
+    ports::BatteryReading,
+    tuning::{BATTERY_REPORT_DELTA_HALF_PERCENT, BATTERY_REPORT_DELTA_MV},
+};
 
-use soil_sensor_core::ports::BatteryReading;
-use soil_sensor_core::tuning::{BATTERY_REPORT_DELTA_HALF_PERCENT, BATTERY_REPORT_DELTA_MV};
-
+/// The Power Source cluster with the `BATTERY` feature and the attributes this
+/// handler serves.
 pub const CLUSTER: Cluster<'static> = FULL_CLUSTER
     .with_features(Feature::BATTERY.bits())
     .with_attrs(with!(required;
@@ -70,6 +73,8 @@ fn charge_level(reading: Option<BatteryReading>) -> BatChargeLevelEnum {
 pub struct BatteryCell(Mutex<CriticalSectionRawMutex, Cell<Option<BatteryReading>>>);
 
 impl BatteryCell {
+    /// A cell with nothing reported yet.
+    #[must_use]
     pub const fn new() -> Self {
         Self(Mutex::new(Cell::new(None)))
     }
@@ -97,6 +102,7 @@ const READING_ATTRIBUTES: [AttributeId; 4] = [
     AttributeId::BatReplacementNeeded,
 ];
 
+/// The cluster handler for the battery-shaped Power Source cluster.
 pub struct PowerSourceHandler<'a> {
     endpoint_id: EndptId,
     dataver: Dataver,
@@ -109,6 +115,7 @@ pub struct PowerSourceHandler<'a> {
 }
 
 impl<'a> PowerSourceHandler<'a> {
+    /// A handler for the cluster on `endpoint_id`, serving what `reading` holds.
     pub const fn new(endpoint_id: EndptId, dataver: Dataver, reading: &'a BatteryCell) -> Self {
         Self {
             endpoint_id,
@@ -159,7 +166,7 @@ impl<'a> PowerSourceHandler<'a> {
                 let half = if half_percent % 2 == 0 { "" } else { ".5" };
                 log::info!(
                     "Battery: {percent}{half}% ({rest_mv} mV, reported change: {should_report})"
-                )
+                );
             }
             None => log::info!("Battery: unknown (reported change: {should_report})"),
         }
@@ -215,11 +222,12 @@ impl ClusterHandler for PowerSourceHandler<'_> {
         // Empty per spec means "powers the node as a whole", which is our
         // case - there is only one endpoint.
         match builder {
-            ArrayAttributeRead::ReadAll(builder) => builder.end(),
+            ArrayAttributeRead::ReadAll(builder) | ArrayAttributeRead::ReadNone(builder) => {
+                builder.end()
+            }
             ArrayAttributeRead::ReadOne(_, _) => {
                 Err(rs_matter::error::ErrorCode::ConstraintError.into())
             }
-            ArrayAttributeRead::ReadNone(builder) => builder.end(),
         }
     }
 
@@ -255,16 +263,17 @@ impl ClusterHandler for PowerSourceHandler<'_> {
 mod tests {
     use super::*;
 
-    fn reading(half_percent: u8, rest_mv: u32) -> Option<BatteryReading> {
-        Some(BatteryReading {
+    fn reading(half_percent: u8, rest_mv: u32) -> BatteryReading {
+        BatteryReading {
             half_percent,
             rest_mv,
-        })
+        }
     }
 
     struct ReportTestCase {
         name: &'static str,
-        earlier: Option<Option<BatteryReading>>,
+        /// The reports before the one under test, oldest first.
+        earlier: Vec<Option<BatteryReading>>,
         input: Option<BatteryReading>,
         expected_reported: bool,
         expected_stored: Option<BatteryReading>,
@@ -275,56 +284,56 @@ mod tests {
         let test_cases = vec![
             ReportTestCase {
                 name: "the first reading always reports",
-                earlier: None,
-                input: reading(160, 1400),
+                earlier: vec![],
+                input: Some(reading(160, 1400)),
                 expected_reported: true,
-                expected_stored: reading(160, 1400),
+                expected_stored: Some(reading(160, 1400)),
             },
             ReportTestCase {
                 name: "ten millivolts is converter noise at this scale",
-                earlier: Some(reading(160, 1400)),
-                input: reading(160, 1410),
+                earlier: vec![Some(reading(160, 1400))],
+                input: Some(reading(160, 1410)),
                 expected_reported: false,
-                expected_stored: reading(160, 1400),
+                expected_stored: Some(reading(160, 1400)),
             },
             ReportTestCase {
                 name: "a voltage that moved enough is reported",
-                earlier: Some(reading(160, 1400)),
-                input: reading(158, 1380),
+                earlier: vec![Some(reading(160, 1400))],
+                input: Some(reading(158, 1380)),
                 expected_reported: true,
-                expected_stored: reading(158, 1380),
+                expected_stored: Some(reading(158, 1380)),
             },
             ReportTestCase {
                 name: "a charge that moved enough is reported inside the voltage deadband",
-                earlier: Some(reading(80, 1260)),
-                input: reading(70, 1250),
+                earlier: vec![Some(reading(80, 1260))],
+                input: Some(reading(70, 1250)),
                 expected_reported: true,
-                expected_stored: reading(70, 1250),
+                expected_stored: Some(reading(70, 1250)),
             },
             ReportTestCase {
                 name: "a crossing into the warning level is reported",
-                earlier: Some(reading(41, 1219)),
-                input: reading(39, 1218),
+                earlier: vec![Some(reading(41, 1219))],
+                input: Some(reading(39, 1218)),
                 expected_reported: true,
-                expected_stored: reading(39, 1218),
+                expected_stored: Some(reading(39, 1218)),
             },
             ReportTestCase {
                 name: "a small change inside one charge level is not reported",
-                earlier: Some(reading(39, 1218)),
-                input: reading(37, 1215),
+                earlier: vec![Some(reading(39, 1218))],
+                input: Some(reading(37, 1215)),
                 expected_reported: false,
-                expected_stored: reading(39, 1218),
+                expected_stored: Some(reading(39, 1218)),
             },
             ReportTestCase {
                 name: "a cell taken out is reported as unknown",
-                earlier: Some(reading(160, 1400)),
+                earlier: vec![Some(reading(160, 1400))],
                 input: None,
                 expected_reported: true,
                 expected_stored: None,
             },
             ReportTestCase {
                 name: "no cell from the start is not news, the attributes are already null",
-                earlier: None,
+                earlier: vec![],
                 input: None,
                 expected_reported: false,
                 expected_stored: None,
@@ -343,7 +352,7 @@ mod tests {
             // shared one would let one case's reports suppress another's.
             let cell: &'static BatteryCell = Box::leak(Box::new(BatteryCell::new()));
             let handler = PowerSourceHandler::new(1, Dataver::new(0), cell);
-            if let Some(earlier) = earlier {
+            for earlier in earlier {
                 handler.report(earlier);
             }
             let before = handler.dataver();
@@ -375,22 +384,22 @@ mod tests {
             },
             ChargeLevelTestCase {
                 name: "20% is still OK",
-                input: reading(40, 1220),
+                input: Some(reading(40, 1220)),
                 expected: BatChargeLevelEnum::OK,
             },
             ChargeLevelTestCase {
                 name: "19.5% is a warning",
-                input: reading(39, 1219),
+                input: Some(reading(39, 1219)),
                 expected: BatChargeLevelEnum::Warning,
             },
             ChargeLevelTestCase {
                 name: "5% is still a warning",
-                input: reading(10, 1170),
+                input: Some(reading(10, 1170)),
                 expected: BatChargeLevelEnum::Warning,
             },
             ChargeLevelTestCase {
                 name: "4.5% is critical",
-                input: reading(9, 1165),
+                input: Some(reading(9, 1165)),
                 expected: BatChargeLevelEnum::Critical,
             },
         ];

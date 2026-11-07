@@ -13,9 +13,11 @@
 //! decision, and it is exactly the point where a simulator has to behave like
 //! hardware.
 
-use crate::led::LedCommand;
-use crate::time::{Instant, Millis};
-use crate::tuning;
+use crate::{
+    led::LedCommand,
+    time::{Instant, Millis},
+    tuning,
+};
 
 /// One battery estimate, from one reading of the cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,13 +26,16 @@ pub struct BatteryReading {
     /// unit of the `BatPercentRemaining` attribute, so no resolution is lost
     /// on the way to it.
     pub half_percent: u8,
+    /// The resting voltage of the cell the estimate comes from, in millivolts.
     pub rest_mv: u32,
 }
 
 /// Which way the button just moved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonEdge {
+    /// The button was pressed. It pulls the pin low.
     Falling,
+    /// The button was released.
     Rising,
 }
 
@@ -42,20 +47,31 @@ pub enum ButtonEdge {
 /// Diagnostics cluster's `BootReason` attribute, and stays in the device layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WakeCause {
+    /// Power-on, or any reset that is not a wake from deep sleep.
     Cold,
+    /// The deep-sleep timer ran out.
     Timer,
+    /// A button press woke the device from deep sleep.
     Button,
 }
 
+/// The ICD (Intermittently Connected Device) power mode of the protocol stack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PowerMode {
+    /// The stack polls fast, because an exchange is in progress or expected.
     Active,
+    /// The stack polls slowly, and the device may sleep.
     Idle,
 }
 
+/// The ICD operating mode of the protocol stack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OperatingMode {
+    /// Short Idle Time: no controller has registered for check-ins, so the
+    /// device has to stay reachable within seconds.
     Sit,
+    /// Long Idle Time: a controller has registered for check-ins, so the
+    /// device may sleep for a whole idle period.
     Lit,
 }
 
@@ -63,7 +79,9 @@ pub enum OperatingMode {
 /// values so the decision layer never names a protocol type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IcdState {
+    /// Whether the stack is active or idle right now.
     pub power_mode: PowerMode,
+    /// Whether the stack operates as a short or a long idle device.
     pub operating_mode: OperatingMode,
     /// The poll interval in effect right now, in milliseconds.
     pub poll_interval_ms: u32,
@@ -76,6 +94,7 @@ pub struct IcdState {
 pub enum Event {
     /// The deadline the decision layer asked for.
     Deadline,
+    /// The button moved.
     Button(ButtonEdge),
     /// The protocol stack's view of the device changed.
     Icd,
@@ -86,7 +105,10 @@ pub enum Event {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
     /// Power the MCU down for this many milliseconds.
-    Sleep { for_ms: u64 },
+    Sleep {
+        /// How long to sleep, in milliseconds.
+        for_ms: u64,
+    },
     /// Erase what a person would expect a reset to erase, then restart.
     FactoryReset,
 }
@@ -94,11 +116,14 @@ pub enum Outcome {
 /// The two probe references a calibration captures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Calibration {
+    /// The probe reading in dry air, in millivolts. The higher of the two.
     pub dry_mv: i32,
+    /// The probe reading in water, in millivolts.
     pub wet_mv: i32,
 }
 
 impl Calibration {
+    /// The firmware's built-in references, for a device nobody has calibrated.
     pub const DEFAULT: Self = Self {
         dry_mv: tuning::SOIL_CAL_DEFAULT_DRY_MV,
         wet_mv: tuning::SOIL_CAL_DEFAULT_WET_MV,
@@ -118,6 +143,7 @@ pub trait Ports {
     /// Milliseconds since this boot began. Use for deadlines within a boot.
     fn now(&self) -> Instant;
 
+    /// Wait for `d`, with nothing able to cut the wait short.
     async fn delay(&mut self, d: Millis);
 
     /// Wait until the deadline, a button edge, or a change in the protocol
@@ -129,6 +155,7 @@ pub trait Ports {
     /// cannot be mistaken for an idle device.
     fn try_next_button_edge(&mut self) -> Option<ButtonEdge>;
 
+    /// Show `cmd` on the status LEDs, without waiting for it to finish.
     fn send_led(&mut self, cmd: LedCommand);
 
     /// One averaged reading of the soil probe, in millivolts. The device layer
@@ -139,18 +166,21 @@ pub trait Ports {
     /// One averaged reading of the cell's resting voltage, in millivolts.
     async fn read_battery_mv(&mut self) -> u32;
 
+    /// What the protocol stack thinks of the device right now.
     fn icd(&self) -> IcdState;
 
     /// Ask the protocol stack to stay reachable, for `hold` or for the
     /// stack's own default window.
     fn request_active(&mut self, hold: Option<Millis>);
 
+    /// Hand a soil moisture reading, in percent, to the protocol stack.
     fn report_soil(&mut self, percent: u8);
 
     /// `None` when there is no cell to estimate: the reading is too low to come
     /// from one.
     fn report_battery(&mut self, reading: Option<BatteryReading>);
 
+    /// The stored calibration, or [`Calibration::DEFAULT`] when there is none.
     async fn load_calibration(&mut self) -> Calibration;
 
     /// `false` when the values could not be stored, in which case the previous

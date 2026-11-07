@@ -12,6 +12,7 @@
 
 #![cfg_attr(not(test), no_std)]
 
+/// The Matter device types the node's endpoints claim.
 pub mod devices;
 pub mod power_source;
 pub mod soil_measurement;
