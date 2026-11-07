@@ -1,10 +1,12 @@
 # cargo-deny configuration
 # See: https://embarkstudios.github.io/cargo-deny/
 #
-# License rules:
-# - Permissive and public domain licenses: ALLOWED
-# - Copyleft licenses: NOT ALLOWED
-# - Specific exceptions: EPL, MPL, LGPL (weak copyleft, unmodified use only)
+# License rules: this workspace is MIT OR Apache-2.0, and the firmware links
+# everything below into one binary that people may redistribute. So every
+# dependency must be permissive, or weak copyleft at file level for code that
+# never reaches the binary. Strong copyleft (GPL, AGPL) and LGPL are not
+# allowed: their terms do not fit a statically linked MIT OR Apache-2.0
+# firmware.
 
 [graph]
 targets = []
@@ -20,8 +22,10 @@ ignore = []
 [licenses]
 version = 2
 confidence-threshold = 0.8
-# Don't warn about licenses in allow list that aren't used by any crate
-unused-allowed-license = "allow"
+# The list holds exactly the licenses in use, so a new license in the tree is
+# a decision someone makes, not something that slips in. A license that stops
+# being used warns, so the list does not grow stale.
+unused-allowed-license = "warn"
 
 allow = [
     # Permissive licenses
@@ -32,33 +36,18 @@ allow = [
     "BSD-3-Clause",
     "ISC",
     "Zlib",
-    "BSL-1.0",               # Boost Software License
-    "Unlicense",
-    "CDLA-Permissive-2.0",   # Community Data License Agreement Permissive
-    "BlueOak-1.0.0",         # Blue Oak Model License (used by tinyrlibc)
+    "BSL-1.0",               # Boost Software License (ryu)
+    "Unicode-3.0",           # the Unicode data tables (icu, unicode-ident)
+    "BlueOak-1.0.0",         # Blue Oak Model License (tinyrlibc, verhoeff)
 
     # Public domain
-    "CC0-1.0",
+    "Unlicense",
     "0BSD",
 
-    # Weak copyleft - unmodified use and linking only
+    # Weak copyleft, file level. Only rs-matter's build-time code generator
+    # uses it (nom-supreme and its helpers), so none of it reaches the
+    # firmware binary.
     "MPL-2.0",
-    "LGPL-2.0-only",
-    "LGPL-2.0-or-later",
-    "LGPL-2.1-only",
-    "LGPL-2.1-or-later",
-    "LGPL-3.0-only",
-    "LGPL-3.0-or-later",
-
-    # Eclipse licenses - unmodified use only
-    "EPL-1.0",
-    "EPL-2.0",
-
-    # Other
-    "W3C",
-    "Unicode-3.0",
-    "Unicode-DFS-2016",
-    "OpenSSL",
 ]
 
 # tinyrlibc has no license field in its manifest, only a LICENCES.md with the

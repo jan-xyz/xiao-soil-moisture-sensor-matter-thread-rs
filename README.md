@@ -214,3 +214,21 @@ Firmware behavior ported from
 (Apache 2.0). Built on [rs-matter](https://github.com/project-chip/rs-matter),
 [rs-matter-stack](https://github.com/sysgrok/rs-matter-stack) and
 [rs-matter-embassy](https://github.com/sysgrok/rs-matter-embassy).
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([`LICENSE-APACHE`](LICENSE-APACHE))
+- MIT license ([`LICENSE-MIT`](LICENSE-MIT))
+
+at your option.
+
+The firmware's behaviour is a port of the C++ original named under Credits,
+which is Apache 2.0. This code is a rewrite in Rust, not a copy of its files.
+The original has no NOTICE file to carry along.
+
+Every dependency the firmware links is under a permissive license, so the
+firmware binary can be passed on under either license above. `deny.toml` lists
+the licenses that are allowed in the dependency tree, and `make lint` checks
+them.
