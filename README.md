@@ -1,14 +1,14 @@
 # XIAO Soil Moisture Sensor - Matter over Thread (Rust)
 
 A Rust (`no_std`, [embassy](https://embassy.dev/), [esp-hal](https://github.com/esp-rs/esp-hal))
-port of [automatous-io/xiao-soil-moisture-sensor-matter-thread](https://github.com/automatous-io/xiao-soil-moisture-sensor-matter-thread),
+firmware inspired by [automatous-io/xiao-soil-moisture-sensor-matter-thread](https://github.com/automatous-io/xiao-soil-moisture-sensor-matter-thread),
 built on [rs-matter-embassy](https://github.com/sysgrok/rs-matter-embassy)'s
 `light_thread_coex` example. Targets the [Seeed Studio XIAO Soil Moisture
 Sensor kit](https://www.seeedstudio.com/XIAO-Soil-Sensor-p-6452.html) (a
 capacitive soil probe, three status LEDs, a button and an AA battery holder
 on a XIAO ESP32-C6 carrier).
 
-> **Disclaimer**: like the original firmware, this uses Matter test
+> **Disclaimer**: like the C++ firmware, this uses Matter test
 > credentials (vendor ID `0xFFF1`, product ID `0x8010`) and is not
 > CSA-certified. Ecosystems will warn about an uncertified device during
 > commissioning - that warning is expected. You assume all responsibility
@@ -16,8 +16,8 @@ on a XIAO ESP32-C6 carrier).
 
 ## Status: pragmatic MVP, not full parity
 
-This is a from-scratch Rust port, not a line-for-line translation, and it
-deliberately does not match every feature of the C++ original. See
+This is its own firmware, written from scratch in Rust. It took the idea from
+the C++ firmware, and it deliberately does not have every feature of it. See
 [Known limitations](#known-limitations) below before flashing.
 
 ## Documentation
@@ -113,7 +113,7 @@ low.
 
 ## Known limitations
 
-Deliberately out of scope for this port (all present in the C++ original):
+Deliberately out of scope (all present in the C++ firmware):
 
 - **Matter OTA over Thread.** No OTA partitions or requestor.
 - **Battery sag / internal-resistance health measurement.** Only resting voltage
@@ -142,7 +142,7 @@ Consequences of the deep-sleeping LIT profile (see [Power](#power)):
   and the Check-In exchange on a real network, and it is set by reasoning rather
   than measured on this board.
 
-One constraint discovered during the port, not present in the C++ original:
+One constraint that the C++ firmware does not have:
 
 - **The RNG and the sensors share one ADC unit**, so the firmware seeds its
   CSPRNG once at boot and then releases the ADC for the probe and the battery.
@@ -209,7 +209,7 @@ simulated ones.
 
 ## Credits
 
-Firmware behavior ported from
+Inspired by
 [automatous-io/xiao-soil-moisture-sensor-matter-thread](https://github.com/automatous-io/xiao-soil-moisture-sensor-matter-thread)
 (Apache 2.0). Built on [rs-matter](https://github.com/project-chip/rs-matter),
 [rs-matter-stack](https://github.com/sysgrok/rs-matter-stack) and
@@ -218,10 +218,6 @@ Firmware behavior ported from
 ## License
 
 Licensed under the Apache License, Version 2.0 ([`LICENSE`](LICENSE)).
-
-The firmware's behaviour is a port of the C++ original named under Credits,
-which is Apache 2.0. This code is a rewrite in Rust, not a copy of its files.
-The original has no NOTICE file to carry along.
 
 Every dependency the firmware links is under a permissive license, so the
 firmware binary can be passed on under the Apache License. `deny.toml` lists

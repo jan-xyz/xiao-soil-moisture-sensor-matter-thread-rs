@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Firmware for the Seeed XIAO ESP32-C6 soil-moisture kit: a Rust `no_std` / embassy
-/ `esp-hal` Matter-over-Thread accessory, ported from the C++/ESP-IDF original and
+/ `esp-hal` Matter-over-Thread accessory, inspired by a C++/ESP-IDF firmware and
 built on `rs-matter-embassy`'s `light_thread_coex` example.
 
 **This file is the agent delta, not the documentation.** Everything worth reading
