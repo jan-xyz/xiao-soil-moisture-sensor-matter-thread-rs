@@ -171,7 +171,7 @@ make flash            # build + flash + monitor
 make monitor          # attach to an already-flashed board
 make test             # the host test suites
 make sim              # run the behaviour against a scripted world, no hardware
-make lint             # cargo clippy, for the device and for the host
+make lint             # clippy, rustfmt, unused dependencies, licenses
 ```
 
 The platform traps - macOS needing a riscv-capable clang, why host commands must

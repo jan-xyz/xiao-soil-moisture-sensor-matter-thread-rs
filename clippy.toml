@@ -1,0 +1,16 @@
+# Clippy configuration for the workspace
+# See: https://doc.rust-lang.org/clippy/configuration.html
+
+# Documentation lints
+# Enforce documentation on all public APIs
+missing-docs-in-crate-items = true
+
+# Code quality lints
+# Enforce consistent naming conventions
+enum-variant-name-threshold = 3
+
+# Using expect is allowed in tests
+allow-expect-in-tests = true
+
+# Allow using unwrap in tests
+allow-unwrap-in-tests = true

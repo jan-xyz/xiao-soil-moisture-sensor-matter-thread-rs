@@ -17,7 +17,7 @@ make monitor          # attach to an already-flashed board
 make watch            # keep re-attaching: the monitor dies at every deep sleep
 make size             # how big the image is, against its partition
 make check            # cargo check
-make fmt              # cargo fmt
+make fmt              # clippy --fix, then cargo fmt
 ```
 
 `cargo run` uses the runner in `.cargo/config.toml`, so flashing and monitoring
@@ -111,9 +111,27 @@ For the same reason, do not build the firmware with `--all-targets` for the host
 make lint
 ```
 
-Three passes: the firmware, the two lower layers as they build for the device, and
-those same layers as they build for the host — where the tests and the simulator
-live, and where nothing device-specific may appear.
+Three clippy passes: the firmware, the two lower layers as they build for the
+device, and those same layers as they build for the host — where the tests and the
+simulator live, and where nothing device-specific may appear. Then `cargo fmt
+--check`, `cargo machete` for unused dependencies, and `cargo deny check licenses`.
+The last two are installed with `cargo install` the first time.
+
+The lint levels are in `[workspace.lints]` in `Cargo.toml`, with the pedantic
+clippy group on and `warnings` denied. That last part applies to every build, not
+only to `make lint`: a warning fails `make build` and `make test` too. The other
+rules are in `clippy.toml`, `rustfmt.toml` and `deny.toml`. The rustfmt import
+rules are nightly-only, which costs nothing here, because the bare-metal target
+needs nightly anyway.
+
+`make fmt` applies what clippy and rustfmt can fix on their own. It lowers the
+lints to warnings for that run (`--cap-lints warn`), because `clippy --fix` cannot
+fix code that does not compile, and it names the three firmware-side packages,
+because the flags only reach the packages a command selects.
+
+A dependency that only exists for its features or for what it links has no `use`
+that `cargo machete` could see. Such a dependency is listed in its crate's
+`[package.metadata.cargo-machete]`, with the reason next to it.
 
 ## The pinned forks
 

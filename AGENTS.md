@@ -32,8 +32,9 @@ to get wrong by hand.
 | `make flash` / `flash-release` / `monitor` | via `espflash` |
 | `make test` | the three host suites |
 | `make sim` | the behaviour, against a scripted world (`ARGS="--days 7 -v"`) |
-| `make lint` | three `cargo clippy` passes |
-| `make fmt`, `make check`, `make size` | as named |
+| `make lint` | three `cargo clippy` passes, `fmt --check`, `machete`, `deny` |
+| `make fmt` | `clippy --fix`, then `cargo fmt` |
+| `make check`, `make size` | as named |
 
 ## Layout
 

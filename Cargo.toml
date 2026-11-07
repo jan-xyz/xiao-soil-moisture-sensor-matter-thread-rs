@@ -10,6 +10,29 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
+# Workspace-wide lint configuration
+[workspace.lints.rust]
+missing_docs = "warn"
+unused_imports = "warn"
+warnings = { level = "deny" }
+
+[workspace.lints.clippy]
+# Enable pedantic lint group for additional code quality checks
+pedantic = "warn"
+# Documentation lints
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+# Disallow using expect
+expect_used = "warn"
+# Warn if unwrap is used
+unwrap_used = "warn"
+# Warn when .to_string() is used on &str (prefer .to_owned())
+str_to_string = "warn"
+# Enforce RFC 2126 module structure (module.rs instead of module/mod.rs)
+mod_module_files = "warn"
+# Prevent `use` and other items from appearing after statements in a block
+items_after_statements = "warn"
+
 [profile.release]
 codegen-units = 1
 debug = 2

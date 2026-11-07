@@ -1,4 +1,4 @@
-.PHONY: build build-release flash flash-release monitor watch fmt lint test sim check size clean
+.PHONY: build build-release flash flash-release monitor watch fmt lint lint-clippy lint-fmt lint-deps lint-licenses test sim check size clean
 
 HOST := $(shell rustc -vV | sed -n 's/host: //p')
 
@@ -62,13 +62,38 @@ monitor:
 watch:
 	@while true; do espflash monitor 2>/dev/null | $(STAMP); sleep 1; done
 
+# Applies what clippy and rustfmt can fix on their own. The same passes as
+# `lint`: the firmware for the bare-metal target without `--all-targets`, and
+# the host crates with it.
 fmt:
+	cargo clippy --fix --allow-dirty --allow-staged -p soil-sensor-fw -p soil-sensor-core -p soil-sensor-node -- --cap-lints warn
+	cargo clippy --fix --allow-dirty --allow-staged $(HOST_CRATES) $(HOST_BUILD) --all-targets -- --cap-lints warn
 	cargo fmt
 
-lint:
+# The lint levels live in `[workspace.lints]` in `Cargo.toml` and in
+# `clippy.toml`, the format rules in `rustfmt.toml`, and the license rules in
+# `deny.toml`. Three clippy passes, because the firmware only builds for the
+# bare-metal target and the tests only build for the host: the firmware, the
+# libraries it uses on the same target, and the host crates with their tests.
+lint: lint-clippy lint-fmt lint-deps lint-licenses
+
+lint-clippy:
 	cargo clippy -- -D warnings
 	cargo clippy -p soil-sensor-core -p soil-sensor-node -- -D warnings
 	cargo clippy $(HOST_CRATES) $(HOST_BUILD) --all-targets -- -D warnings
+
+lint-fmt:
+	cargo fmt --check
+
+# Unused dependencies. A dependency that is only there for its features or for
+# what it links is listed in its crate's `[package.metadata.cargo-machete]`.
+lint-deps:
+	@command -v cargo-machete >/dev/null || cargo install cargo-machete
+	cargo machete --with-metadata
+
+lint-licenses:
+	@command -v cargo-deny >/dev/null || cargo install --locked cargo-deny
+	cargo deny check licenses
 
 test:
 	cargo test -p soil-sensor-core -p soil-sensor-node $(HOST_BUILD)

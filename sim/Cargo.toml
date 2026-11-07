@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Simulation layer: a scripted world, and the driver that walks boots through it."
 
+[lints]
+workspace = true
+
 [lib]
 name = "soil_sensor_sim"
 path = "src/lib.rs"
@@ -24,9 +27,11 @@ soil-sensor-node = { path = "../node" }
 # firmware build. See `ARCHITECTURE.md`.
 rs-matter = { version = "0.4", default-features = false, features = ["log", "os"] }
 
-embassy-sync = "0.8"
 embassy-futures = "0.1"
 embassy-time = { version = "0.5", features = ["std"] }
 embassy-time-queue-utils = { version = "0.3", features = ["generic-queue-64"] }
-log = "0.4"
-env_logger = "0.11"
+
+# These are only here for what they link, which cargo-machete cannot see:
+# `embassy-time`'s `std` time driver and `embassy-time-queue-utils`' timer queue.
+[package.metadata.cargo-machete]
+ignored = ["embassy-time", "embassy-time-queue-utils"]

@@ -1,0 +1,11 @@
+# rustfmt configuration for the workspace
+# imports_granularity and group_imports are nightly-only. rust-toolchain.toml
+# already pins nightly for the bare-metal target, so plain `cargo fmt` honours
+# them.
+# Import formatting
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+reorder_imports = true
+# rustfmt keeps the original text of an expression that it cannot fit into max_width, and
+# `--check` then passes. This option makes rustfmt fail in that case.
+error_on_line_overflow = true

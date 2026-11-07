@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Integration layer: the Matter node - endpoints, clusters, protocol glue."
 
+[lints]
+workspace = true
+
 [lib]
 name = "soil_sensor_node"
 path = "src/lib.rs"
@@ -26,3 +29,8 @@ log = "0.4"
 # target, and dev-dependencies are never built for it - so this cannot reach the
 # firmware. See `ARCHITECTURE.md` on why the host and device layers stay apart.
 critical-section = { version = "1", features = ["std"] }
+
+# `critical-section` is only here for its `std` implementation, which a host
+# test binary needs to link. No code names it.
+[package.metadata.cargo-machete]
+ignored = ["critical-section"]

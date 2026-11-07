@@ -4343,7 +4343,6 @@ dependencies = [
 name = "soil-sensor-fw"
 version = "0.1.0"
 dependencies = [
- "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.8.0",
@@ -4383,11 +4382,8 @@ name = "soil-sensor-sim"
 version = "0.1.0"
 dependencies = [
  "embassy-futures",
- "embassy-sync 0.8.0",
  "embassy-time",
  "embassy-time-queue-utils",
- "env_logger",
- "log",
  "rs-matter",
  "soil-sensor-core",
  "soil-sensor-node",

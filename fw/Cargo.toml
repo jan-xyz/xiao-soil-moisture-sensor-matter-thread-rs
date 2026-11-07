@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Device layer: peripherals, pin map, and the composition root."
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "xiao-soil-moisture-sensor-matter-thread"
 path = "src/main.rs"
@@ -19,7 +22,6 @@ soil-sensor-node = { path = "../node" }
 
 log = "0.4"
 embassy-executor = "0.10"
-embassy-embedded-hal = "0.6"
 embassy-futures = "0.1"
 embassy-time = "0.5"
 embassy-sync = "0.8"
@@ -75,3 +77,9 @@ thread = [
   "rs-matter-embassy/case-resumption",
   "rs-matter-embassy/persistent-subscriptions",
 ]
+
+# These are only here for their features, which cargo-machete cannot see:
+# `esp-radio` for BLE and the chip, `portable-atomic` for its critical-section
+# implementation.
+[package.metadata.cargo-machete]
+ignored = ["esp-radio", "portable-atomic"]
