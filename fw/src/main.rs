@@ -430,23 +430,18 @@ async fn main(s: Spawner) {
 
     // Flash: one physical peripheral, shared between the protocol stack's own
     // persistence and the calibration store (see `flash.rs`). The partition
-    // table is read through `esp_hal::flash::Flash`, which takes the FLASH
-    // peripheral and has no way to give it back; the storage layer therefore
-    // re-takes a second handle afterwards. The reader is done with the flash
-    // by then and holds no hardware state, so the two never touch it at once.
-    let mut flash = Flash::new(peripherals.FLASH, FlashConfig::default()).unwrap();
+    // table is read through a driver on a reborrow of the FLASH peripheral,
+    // which ends with the block, so the storage layer's driver is the only one
+    // left when it takes the peripheral itself.
     let mut pt_buf = [0u8; PARTITION_TABLE_MAX_LEN];
-    let pt = read_partition_table(&mut flash, &mut pt_buf).unwrap();
+    let pt = {
+        let mut flash = Flash::new(peripherals.FLASH.reborrow(), FlashConfig::default()).unwrap();
+        read_partition_table(&mut flash, &mut pt_buf).unwrap()
+    };
 
     let flash_bus: &'static SharedFlashBus =
         mk_static!(SharedFlashBus).init_with(BlockingMutex::new(RefCell::new(FlashCell::new(
-            // SAFETY: the FLASH peripheral was owned by the partition-table
-            // reader above, which is dropped; nothing else takes a handle.
-            Flash::new(
-                unsafe { esp_hal::peripherals::FLASH::steal() },
-                FlashConfig::default(),
-            )
-            .unwrap(),
+            Flash::new(peripherals.FLASH, FlashConfig::default()).unwrap(),
         ))));
 
     let nvs = pt
