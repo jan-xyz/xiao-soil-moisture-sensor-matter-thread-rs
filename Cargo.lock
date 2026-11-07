@@ -1567,6 +1567,7 @@ version = "0.6.0"
 source = "git+https://github.com/ivmarkov/esp-hal?rev=6f81b6177dee8dd200df2e1cd0b94e10d8b9fc7f#6f81b6177dee8dd200df2e1cd0b94e10d8b9fc7f"
 dependencies = [
  "document-features",
+ "embedded-storage",
  "esp-config",
  "esp-hal",
  "esp-hal-procmacros",
@@ -1823,21 +1824,6 @@ dependencies = [
  "portable-atomic",
  "riscv",
  "xtensa-lx",
-]
-
-[[package]]
-name = "esp-storage"
-version = "0.10.0"
-source = "git+https://github.com/ivmarkov/esp-hal?rev=6f81b6177dee8dd200df2e1cd0b94e10d8b9fc7f#6f81b6177dee8dd200df2e1cd0b94e10d8b9fc7f"
-dependencies = [
- "document-features",
- "embedded-storage",
- "esp-hal",
- "esp-hal-procmacros",
- "esp-metadata-generated 0.6.0",
- "esp-rom-sys",
- "esp-sync",
- "esp32c6",
 ]
 
 [[package]]
@@ -4371,7 +4357,6 @@ dependencies = [
  "esp-println",
  "esp-radio",
  "esp-rtos",
- "esp-storage",
  "log",
  "portable-atomic",
  "rs-matter-embassy",

@@ -13,7 +13,6 @@
 //! The volatile lifetime needs no code: it is the boot's own stack.
 
 use core::cell::RefCell;
-use core::ops::Range;
 
 use embassy_futures::block_on;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
@@ -41,10 +40,14 @@ const KEY_WET_MV: u8 = 2;
 ///
 /// The flash operation completes inside the poll of the task that started it:
 /// see [`SharedKvStore`] for why nothing here may await across the flash.
-pub fn load_calibration(flash: SharedFlash<'_, '_>, range: Range<u32>) -> Calibration {
+pub fn load_calibration(flash: SharedFlash<'_, '_>) -> Calibration {
     block_on(async {
         let mut buf = [0u8; 32];
-        let mut storage = MapStorage::new(flash, MapConfig::new(range), Cache::new_uncached());
+        let mut storage = MapStorage::new(
+            flash,
+            MapConfig::new(0..flash.partition_len()),
+            Cache::new_uncached(),
+        );
 
         let dry_mv = storage
             .fetch_item::<i32>(&mut buf, &KEY_DRY_MV)
@@ -65,21 +68,17 @@ pub fn load_calibration(flash: SharedFlash<'_, '_>, range: Range<u32>) -> Calibr
 
 /// Stores both references. `false` when either write failed, in which case the
 /// caller keeps using the previous calibration.
-pub fn store_calibration(
-    flash: SharedFlash<'_, '_>,
-    range: Range<u32>,
-    calibration: Calibration,
-) -> bool {
-    block_on(async { store_calibration_async(flash, range, calibration).await })
+pub fn store_calibration(flash: SharedFlash<'_, '_>, calibration: Calibration) -> bool {
+    block_on(async { store_calibration_async(flash, calibration).await })
 }
 
-async fn store_calibration_async(
-    flash: SharedFlash<'_, '_>,
-    range: Range<u32>,
-    calibration: Calibration,
-) -> bool {
+async fn store_calibration_async(flash: SharedFlash<'_, '_>, calibration: Calibration) -> bool {
     let mut buf = [0u8; 32];
-    let mut storage = MapStorage::new(flash, MapConfig::new(range), Cache::new_uncached());
+    let mut storage = MapStorage::new(
+        flash,
+        MapConfig::new(0..flash.partition_len()),
+        Cache::new_uncached(),
+    );
 
     if storage
         .store_item(&mut buf, &KEY_DRY_MV, &calibration.dry_mv)

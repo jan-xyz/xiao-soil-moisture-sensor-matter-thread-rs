@@ -12,7 +12,6 @@
 //! meaning against a clock it controls.
 
 use core::cell::RefCell;
-use core::ops::Range;
 
 use embassy_futures::select::{select3, Either3};
 use embassy_time::{Duration, Timer};
@@ -53,7 +52,6 @@ where
     pub rtc: &'a RefCell<Rtc<'d>>,
     pub icd: &'static Icd,
     pub flash: SharedFlash<'a, 'd>,
-    pub calibration_range: Range<u32>,
     pub soil_handler: &'a SoilMeasurementHandler<'a>,
     pub power_handler: &'a PowerSourceHandler<'a>,
     /// The matter half of the ports: `None` for exactly as long as the boot's
@@ -181,11 +179,11 @@ where
     }
 
     async fn load_calibration(&mut self) -> Calibration {
-        store::load_calibration(self.flash, self.calibration_range.clone())
+        store::load_calibration(self.flash)
     }
 
     async fn store_calibration(&mut self, calibration: Calibration) -> bool {
-        store::store_calibration(self.flash, self.calibration_range.clone(), calibration)
+        store::store_calibration(self.flash, calibration)
     }
 }
 

@@ -29,8 +29,7 @@ esp-rtos = { version = "0.4", features = ["esp-radio", "embassy"] }
 esp-alloc = "0.11"
 esp-println = { version = "0.18", features = ["log-04"] }
 esp-radio = { version = "1.0.0-beta.1", features = ["ble", "log-04", "unstable"] }
-esp-storage = { version = "0.10", features = ["embedded-storage"] }
-esp-bootloader-esp-idf = { version = "0.6", features = ["log-04"] }
+esp-bootloader-esp-idf = { version = "0.6", features = ["log-04", "embedded-storage"] }
 esp-metadata-generated = "0.5"
 
 # Pinned to `sysgrok/rs-matter-embassy`'s `master`, where the ICD work and the
@@ -62,7 +61,6 @@ esp32c6 = [
   "esp-backtrace/esp32c6",
   "esp-println/esp32c6",
   "esp-radio/esp32c6",
-  "esp-storage/esp32c6",
   "esp-bootloader-esp-idf/esp32c6",
   "esp-metadata-generated/esp32c6",
   "portable-atomic/critical-section",

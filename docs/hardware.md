@@ -124,25 +124,38 @@ sleeps.
 
 ## Flash is one peripheral with two users, and one page of read-ahead
 
-`esp_storage::FlashStorage` owns the `FLASH` peripheral and can only be
+`esp_hal::flash::Flash` owns the `FLASH` peripheral and can only be
 constructed once, but two independent things need it: Matter's own key-value
 store (fabrics, sessions, subscriptions, ICD registrations, the reboot counter)
 and the dry/wet calibration. They borrow one instance through a mutex rather than
 each claiming their own.
 
-Every read also serves from a read-ahead window in RAM (`fw/src/flash.rs`),
-sized past the largest partition the firmware scans. Since the KV store tracks
-its keys in RAM (upstream rs-matter-embassy PR 91), a lookup for a key that is
-not present - of which the fabric table's loader does one per possible fabric
-index at every startup, and fabric indices only ever grow - no longer touches
-flash at all. What still walks the flash's stored items' headers in small
-sequential reads is the KV store's single key scan per boot and the calibration
-lookups. With the whole region buffered, the first walk costs one real flash
-read and every further read is pure RAM. An earlier, one-page buffer did
-nothing here: a walk covers six flash pages, so a one-page cache over that
-working set re-read the whole region on every walk. The buffer is invalidated
-on every write and erase, and it lives under the same lock as the flash, so a
-scanner can never hold a stale window across someone else's write.
+The driver is `esp_hal::flash::Flash` (the in-tree replacement for the
+deprecated `esp-storage`): it guards every ROM operation with the flash cache
+suspended and the interrupts masked, where the old driver did neither - and,
+after the `esp-hal` fork's update, its reads failed outright on this board,
+costing the Matter store every persisted key on every boot. The storage users
+do not touch the driver directly: each operation constructs a `FlashRegion`
+from its `PartitionEntry` (`esp-bootloader-esp-idf`, `embedded-storage`
+feature), which bounds-checks against the partition, refuses to touch the
+partition the running image lives in, and bounces byte slices into the
+word-aligned, DRAM-resident buffers the driver needs. Addresses through these
+handles are partition-relative. The price of the guarding is that an erase
+keeps the interrupts off for its tens of milliseconds; that is accepted
+because erases are rare.
+
+There is no read caching of our own (`fw/src/flash.rs`). Since the KV store
+tracks its keys in RAM (upstream rs-matter-embassy PR 91), a lookup for a key
+that is not present - of which the fabric table's loader does one per possible
+fabric index at every startup, and fabric indices only ever grow - no longer
+touches flash at all, and `sequential-storage`'s cache keeps page states and
+key pointers in RAM after the first pass. What still walks the flash is that
+first pass: the KV store's single key scan per boot and the calibration
+lookups, in small sequential guarded ROM reads costing a few tens of
+milliseconds per boot. A read-ahead window in RAM used to collapse that walk
+into one flash read; it was cut once the upstream cache took over the
+repeated-walk cost, leaving only the once-per-boot first pass, which did not
+justify the window's code.
 
 The flash path is synchronous down to the driver: every operation completes
 inside the poll of the task that started it, and a sector erase blocks the

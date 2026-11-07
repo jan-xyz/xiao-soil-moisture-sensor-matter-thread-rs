@@ -40,7 +40,6 @@ use esp_hal::rtc_cntl::sleep::{LowPower, RtcSleepConfig};
 use esp_hal::rtc_cntl::{wakeup_cause, Rtc, RwdtStage, SocResetReason, WakeupSource};
 use esp_hal::timer::timg::TimerGroup;
 use esp_metadata_generated::memory_range;
-use esp_storage::FlashStorage;
 
 use log::{info, warn};
 
@@ -439,27 +438,33 @@ async fn main(s: Spawner) {
     let mut pt_buf = [0u8; PARTITION_TABLE_MAX_LEN];
     let pt = read_partition_table(&mut flash, &mut pt_buf).unwrap();
 
-    let flash_bus: &'static SharedFlashBus = mk_static!(SharedFlashBus).init_with(
-        BlockingMutex::new(RefCell::new(FlashCell::new(FlashStorage::new(
+    let flash_bus: &'static SharedFlashBus =
+        mk_static!(SharedFlashBus).init_with(BlockingMutex::new(RefCell::new(FlashCell::new(
             // SAFETY: the FLASH peripheral was owned by the partition-table
             // reader above, which is dropped; nothing else takes a handle.
-            unsafe { esp_hal::peripherals::FLASH::steal() },
-        )))),
-    );
+            Flash::new(
+                unsafe { esp_hal::peripherals::FLASH::steal() },
+                FlashConfig::default(),
+            )
+            .unwrap(),
+        ))));
 
     let nvs = pt
         .find_partition(PartitionType::Data(DataPartitionSubType::Nvs))
         .unwrap()
         .unwrap();
-    let nvs_range = nvs.offset()..(nvs.offset() + nvs.len());
 
     let calib = pt.iter().find(|p| p.label_as_str() == "calib").unwrap();
-    let calibration_range = calib.offset()..(calib.offset() + calib.len());
 
     // The Matter store is shared from here on: the boot loop runs while the
     // stack is still starting up, and both sides persist through it. See
-    // `store::SharedKvStore` for the discipline that makes that safe.
-    let kv = store::SharedKvStore::share(SeqMapKvBlobStore::new(SharedFlash(flash_bus), nvs_range));
+    // `store::SharedKvStore` for the discipline that makes that safe. The
+    // handles speak partition-relative addresses, like the regions they run
+    // through.
+    let kv = store::SharedKvStore::share(SeqMapKvBlobStore::new(
+        SharedFlash::new(flash_bus, nvs),
+        0..nvs.len(),
+    ));
 
     // Allocate the protocol stack statically - mandatory for the wireless stack
     // variation, and it avoids blowing the program stack.
@@ -554,8 +559,7 @@ async fn main(s: Spawner) {
         edges: EDGE_CHANNEL.receiver(),
         rtc: &rtc,
         icd,
-        flash: SharedFlash(flash_bus),
-        calibration_range,
+        flash: SharedFlash::new(flash_bus, calib),
         soil_handler: &soil_handler,
         power_handler: &power_handler,
         matter: None,
