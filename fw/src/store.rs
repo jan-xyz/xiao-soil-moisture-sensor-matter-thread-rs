@@ -32,8 +32,14 @@ use crate::flash::SharedFlash;
 
 // --- Durable: the dry/wet calibration ---------------------------------------
 
-const KEY_DRY_MV: u8 = 1;
-const KEY_WET_MV: u8 = 2;
+/// Dry and wet are one item, so that a failed write keeps the old pair whole.
+/// A pair stored as two items could end up as a new dry next to an old wet,
+/// which may even be inverted and then reads 0% forever.
+///
+/// Keys 1 and 2 held the two references as separate items before. They are
+/// not read any more, so a device with an old calibration falls back to the
+/// defaults once and has to be calibrated again.
+const KEY_CALIBRATION: u8 = 3;
 
 /// Reads the persisted references, falling back to the firmware defaults when
 /// nothing has been calibrated yet.
@@ -49,49 +55,39 @@ pub fn load_calibration(flash: SharedFlash<'_, '_>) -> Calibration {
             Cache::new_uncached(),
         );
 
-        let dry_mv = storage
-            .fetch_item::<i32>(&mut buf, &KEY_DRY_MV)
+        match storage
+            .fetch_item::<[i32; 2]>(&mut buf, &KEY_CALIBRATION)
             .await
-            .ok()
-            .flatten()
-            .unwrap_or(SOIL_CAL_DEFAULT_DRY_MV);
-        let wet_mv = storage
-            .fetch_item::<i32>(&mut buf, &KEY_WET_MV)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or(SOIL_CAL_DEFAULT_WET_MV);
-
-        Calibration { dry_mv, wet_mv }
+        {
+            Ok(Some([dry_mv, wet_mv])) => Calibration { dry_mv, wet_mv },
+            _ => Calibration {
+                dry_mv: SOIL_CAL_DEFAULT_DRY_MV,
+                wet_mv: SOIL_CAL_DEFAULT_WET_MV,
+            },
+        }
     })
 }
 
-/// Stores both references. `false` when either write failed, in which case the
-/// caller keeps using the previous calibration.
+/// Stores both references as one item. `false` when the write failed, in which
+/// case the caller keeps using the previous calibration, and so does flash.
 pub fn store_calibration(flash: SharedFlash<'_, '_>, calibration: Calibration) -> bool {
-    block_on(async { store_calibration_async(flash, calibration).await })
-}
+    block_on(async {
+        let mut buf = [0u8; 32];
+        let mut storage = MapStorage::new(
+            flash,
+            MapConfig::new(0..flash.partition_len()),
+            Cache::new_uncached(),
+        );
 
-async fn store_calibration_async(flash: SharedFlash<'_, '_>, calibration: Calibration) -> bool {
-    let mut buf = [0u8; 32];
-    let mut storage = MapStorage::new(
-        flash,
-        MapConfig::new(0..flash.partition_len()),
-        Cache::new_uncached(),
-    );
-
-    if storage
-        .store_item(&mut buf, &KEY_DRY_MV, &calibration.dry_mv)
-        .await
-        .is_err()
-    {
-        return false;
-    }
-
-    storage
-        .store_item(&mut buf, &KEY_WET_MV, &calibration.wet_mv)
-        .await
-        .is_ok()
+        storage
+            .store_item(
+                &mut buf,
+                &KEY_CALIBRATION,
+                &[calibration.dry_mv, calibration.wet_mv],
+            )
+            .await
+            .is_ok()
+    })
 }
 
 // --- Durable: the Matter key-value store -------------------------------------
