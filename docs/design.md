@@ -127,7 +127,7 @@ boot's phases run in sequence in `main` - `run_wake`, then the stack's
 `startup`, which takes the stack by `&mut` because `run` must not precede or
 overlap it - and after that, two futures under one `select`:
 
-- the Matter stack (`stack.run_coex(...)`, Thread and BLE-concurrent
+- the Matter stack (`stack.run_thread(...)`, Thread and BLE-concurrent
   commissioning) — the future that terminates on factory reset;
 - `run_boot`, the operational phase above.
 

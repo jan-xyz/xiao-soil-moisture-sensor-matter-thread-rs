@@ -43,6 +43,98 @@ the firmware cannot change:
   clock preset the C6 exposes - the 100 mA is radio and boost physics, not
   CPU speed.
 
+## The deep-sleep current budget (0.12 mA measured at the cell)
+
+Deep sleep at the cell measures ~0.12 mA. The chip's own share is the datasheet's
+~7 µA (Seeed quotes 15 µA for the whole XIAO at 3.8 V battery input, so the
+module's overhead beyond the chip is ~8 µA). At ~1.4 V cell voltage and ~80 %
+conversion efficiency, the cell current breaks down roughly as:
+
+- **The boost's light-load operation is the biggest single term.** The TPS61021A
+  draws a 17 µA quiescent current *from VOUT* in PFM light-load mode (datasheet),
+  plus switching losses delivering the load - about 40 µA at the cell on its own.
+  It must run in sleep: EN is pulled to VBAT through R10 (316 kΩ, negligible
+  current) and the chip needs 3V3 alive, so nothing can switch it off.
+- **The feedback divider R12+R15 (416 kΩ) costs 7.9 µA at 3V3** (~19 µA at the
+  cell). It can go multi-MΩ if the converter's FB bias current allows.
+- **The button pull.** R6 is 4.7 kΩ to 3V3 on the schematic, which would alone cost
+  0.7 mA at 3V3 - the 0.12 mA measurement proves the assembled board does not have
+  that fitted. An external 1 MΩ with the internal pull-up disabled costs 3.3 µA
+  and still wakes via ext1; the internal pull-up (tens of kΩ) costs tens of µA.
+  Make the fitted value explicit in a redesign.
+- **R16/C6 battery sense draws nothing standing** (sample cap into a high-Z pad),
+  and the LED/probe drivers are off in sleep (base pulled to GND, GPIOs high-Z).
+
+What hangs off the XIAO's 3V3 pin (the carrier back-feeds it): the ESP32-C6FH4 has
+flash in package, so there is no external-flash standby current; the charge LED
+is on VBUS only; but the **RF switch (FM8625H on the XIAO) is powered from +3V3
+through Q3 whenever GPIO3 is not driven high** (R21/R22 hold its gate low), so
+drive GPIO3 high before sleeping to cut it. The XIAO's own buck (SGM60629C) has
+its output back-driven by our 3V3; its input is diode-isolated (D1) from the 5V
+pin, so there is no DC path into the carrier's VDD_5V net.
+
+### Can the board approach the chip's ~7 µA?
+
+Not at the cell with an AA. The cell is 1.2-1.5 V and the chip needs 3.3 V, so a
+converter must switch even in sleep; even a 300 nA-Iq boost (MAX1722x class)
+delivering ~19 µA at 3.3 V draws ~55-80 µA at the cell once the 3.3/1.4 conversion
+ratio and the ~50-60 % light-load efficiency are included. The ~7 µA is only
+reachable at the 3.3 V rail (chip plus a few µA of overhead), or at the cell with
+a Li-ion cell and a nano-Iq LDO (~8-10 µA). Realistic AA target after swapping
+the boost and cleaning up the standing loads: **~60-90 µA at the cell**, roughly
+halving today's 0.12 mA. And per the power summary above, a millisecond awake is
+worth ~25 ms of sleep, so the awake window remains the first lever.
+
+### The `pcb/` redesign (rev 2, in progress)
+
+The original board was copied into `pcb/pcb.kicad_pcb` (KiCad GUI file copy; the
+Copperpour MCP catalogue has no whole-board copy tool, and the skills forbid
+writing `.kicad_pcb` directly). Changes made there so far, all via MCP:
+
+- **U1: TPS61021A -> MAX17222ELT+T** (LCSC C1121854, 6-pin UDFN 2x2, JLCPCB in
+  stock). 300 nA output quiescent vs 17 µA from VOUT on the TPS61021A; True
+  Shutdown (no reverse current into the carrier boost when the XIAO's own buck
+  drives 3V3 on USB). Pinout: 1=OUT, 2=LX, 3=GND, 4=SEL, 5=IN, 6=EN.
+  - SEL: the MAX17222 has no FB divider - **R15 becomes RSEL = 80.6k to GND for
+    3.3 V** (datasheet table). R12 and C9 (the old 416 kΩ divider, 7.9 µA at 3.3 V)
+    are deleted.
+  - EN: R10 (now **33.2 MΩ**) stays VBAT->EN; the MAX17222's enable-transient
+    protection keeps it enabled down to 0.4 V input, and the ETP extra current is
+    ~V/R ≈ 45 nA at 33 MΩ (a 316 kΩ pull-up would cost ~4 µA).
+- **R6 (button pull-up) = 1 MΩ** (3.3 µA at 3V3 instead of the internal pull-up's
+  tens of µA). Requires a firmware change: disable the internal pull-up on GPIO2,
+  ext1 wake on the external 1 MΩ still works.
+- **R21/R22 deleted** (they would short the cell if fitted; the original had them
+  DNP only in the schematic, not in the PCB).
+- All values set on the footprints (the original PCB carried footprint names as
+  values); U1 carries LCSC/MPN fields.
+- Remaining fanout around the new U1 (EN/SEL stubs) is unfinished - a few DRC
+  clearance items in the 0.65 mm-pitch pad field are easier to fix in the GUI.
+- Firmware also should drive **GPIO3 high before deep sleep** to unpower the
+  XIAO's RF switch (Q3 on the module powers it from +3V3 otherwise).
+- Layout TODO for µA budgets: guard-ring + soldermask the SEL/EN nodes and the
+  R16/C6 battery-sense node, keep pours off them, route sense nets on an inner
+  layer, add a 0 Ω jumper in the 3V3 feed to the XIAO to measure its share.
+
+### Layout rules that matter at µA levels
+
+- The FB and EN nodes are high-impedance (416 kΩ / 316 kΩ). Keep VBAT and 3V3
+  copper and pours away from them on the same layer, guard-ring them with GND, and
+  leave soldermask over them; wash no-clean flux or conformally coat. Surface
+  leakage across contaminated FR4/soldermask adds directly to these nodes.
+- Same for the battery-sense node (R16/C6/A0_D0, 100 kΩ source) and the probe node
+  (CAP_SEN, 1 MΩ to GND): route them on an inner layer (encapsulated in FR4, immune
+  to surface contamination) or guard-ringed on an outer layer.
+- The 4-layer stack currently uses only F.Cu/B.Cu - 237 tracks, GND pours only on
+  F.Cu and B.Cu, In1.Cu ("gnd") and In2.Cu ("power") carry no copper. Either go
+  2-layer, or use In1.Cu as a solid GND and In2.Cu for VBAT/3V3 pours so the outer
+  layers stay clean around the sense nodes.
+- R21/R22 (VBAT- to GND, VBAT_1V5 to VBAT) are DNP in the schematic but carry no
+  DNP flag in the PCB; fitted, they would short the cell. Mark them DNP properly
+  in a redesign.
+- Put a 0 Ω jumper (or test point) in the 3V3 feed to the XIAO, so the module's
+  sleep share can be measured separately from the carrier's.
+
 ## The battery reading is a loaded reading
 
 The cell voltage reaches GPIO0 through R16 (100K) into C6 (100 nF) - a sample

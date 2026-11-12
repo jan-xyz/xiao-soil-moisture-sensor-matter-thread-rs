@@ -4,15 +4,41 @@
 //! exercised on the host. That is the pattern the rest of the decision layer
 //! follows: if a calculation can be written without the world, it is.
 
-/// Linear interpolation between the wet (low mV) and dry (high mV)
+use crate::tuning;
+
+/// Piecewise-linear interpolation between the wet (low mV) and dry (high mV)
 /// soil-probe calibration references, clamped to 0-100%.
+///
+/// The bend sits at [`tuning::SOIL_CAL_BREAK_FRAC_PERMILLE`] of the span from
+/// the wet reference and maps to [`tuning::SOIL_CAL_BREAK_PERCENT`] percent.
+/// It is derived from the same two references, so the calibration flow still
+/// captures only dry and wet. The placement near the dry end mirrors the
+/// segmented calibration of Szypłowska et al. 2021 (Geoderma 401, 115288):
+/// their breakpoint lies at a permittivity much closer to air than to water,
+/// with the dry side of the curve steeper than the wet side.
+///
+/// Because the bend is strictly inside the span, both segments slope down in
+/// mV, so the percentage can only fall as the soil dries - it cannot rise in
+/// any region. If the constants were ever misconfigured so the bend left the
+/// span, the plain linear map is used instead, which is still monotone for
+/// any valid span.
 #[must_use]
 pub fn soil_moisture_percent(mv: i32, dry_mv: i32, wet_mv: i32) -> u8 {
     let span = dry_mv - wet_mv;
     if span <= 0 {
         return 0;
     }
-    let pct = 100 * (dry_mv - mv) / span;
+    let break_mv = wet_mv + span * tuning::SOIL_CAL_BREAK_FRAC_PERMILLE / 1000;
+    let break_pct = i32::from(tuning::SOIL_CAL_BREAK_PERCENT);
+    let pct = if break_mv > wet_mv && break_mv < dry_mv {
+        if mv >= break_mv {
+            break_pct * (dry_mv - mv) / (dry_mv - break_mv)
+        } else {
+            100 - (100 - break_pct) * (mv - wet_mv) / (break_mv - wet_mv)
+        }
+    } else {
+        100 * (dry_mv - mv) / span
+    };
     u8::try_from(pct.clamp(0, 100)).unwrap_or(0)
 }
 
@@ -75,6 +101,9 @@ mod tests {
 
     #[test]
     fn test_soil_moisture_percent() {
+        // With dry=1600/wet=900 the derived bend sits at 900 + 700*850/1000 =
+        // 1495 mV, mapping to SOIL_CAL_BREAK_PERCENT (30%): the dry segment
+        // spans 105 mV for 30%, the wet segment 595 mV for 70%.
         let test_cases = vec![
             SoilTestCase {
                 name: "at dry reference reads 0%",
@@ -91,11 +120,46 @@ mod tests {
                 expected: 100,
             },
             SoilTestCase {
-                name: "midpoint reads 50%",
+                name: "at the derived bend reads the bend percent",
+                input_mv: 1495,
+                input_dry_mv: 1600,
+                input_wet_mv: 900,
+                expected: 30,
+            },
+            SoilTestCase {
+                name: "one mV below the bend reads one step wetter",
+                input_mv: 1494,
+                input_dry_mv: 1600,
+                input_wet_mv: 900,
+                expected: 31,
+            },
+            SoilTestCase {
+                name: "one mV above the bend reads one step drier",
+                input_mv: 1496,
+                input_dry_mv: 1600,
+                input_wet_mv: 900,
+                expected: 29,
+            },
+            SoilTestCase {
+                name: "mid-span reads above the linear 50%, the wet side being shallower",
                 input_mv: 1250,
                 input_dry_mv: 1600,
                 input_wet_mv: 900,
-                expected: 50,
+                expected: 59,
+            },
+            SoilTestCase {
+                name: "near dry the curve is steeper than linear: 50 mV off dry is 14%, not 7%",
+                input_mv: 1550,
+                input_dry_mv: 1600,
+                input_wet_mv: 900,
+                expected: 14,
+            },
+            SoilTestCase {
+                name: "the bend follows the calibrated span, not a fixed mV",
+                input_mv: 2305,
+                input_dry_mv: 2500,
+                input_wet_mv: 1200,
+                expected: 30,
             },
             SoilTestCase {
                 name: "wetter than wet reference clamps to 100%",
@@ -130,6 +194,22 @@ mod tests {
         {
             let result = soil_moisture_percent(input_mv, input_dry_mv, input_wet_mv);
             assert_eq!(result, expected, "Failed case: '{name}'");
+        }
+    }
+
+    #[test]
+    fn test_soil_moisture_percent_never_rises_as_mv_rises() {
+        // Drying raises mV, so the reading may only fall as mV rises - in
+        // every region, across the bend and past both references.
+        let (dry, wet) = (1600, 900);
+        let mut previous = u8::MAX;
+        for mv in (wet - 500)..=(dry + 500) {
+            let pct = soil_moisture_percent(mv, dry, wet);
+            assert!(
+                pct <= previous,
+                "at {mv} mV the reading rose to {pct}% (previous {previous}%)"
+            );
+            previous = pct;
         }
     }
 

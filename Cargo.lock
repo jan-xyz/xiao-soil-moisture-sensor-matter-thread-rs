@@ -1069,40 +1069,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "edge-nal"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "590182a48668fa4988cd97b9b500bcc9a213e9b122b4e0008e934b3916c64031"
-dependencies = [
- "embassy-time",
- "embedded-io-async 0.7.0",
-]
-
-[[package]]
-name = "edge-nal-embassy"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79ad23a63d41bdda528a3b725ae9119ce58abeea265b41fc7f8b254c8d07b2a2"
-dependencies = [
- "edge-nal",
- "embassy-futures",
- "embassy-net",
- "embedded-io-async 0.7.0",
- "log",
-]
-
-[[package]]
-name = "edge-nal-openthread"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "847992ca18b3c24ec6f2d5e22c4daca6665e5924d40ddcc57b77a99b7e1d278b"
-dependencies = [
- "edge-nal",
- "log",
- "openthread",
-]
-
-[[package]]
 name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3645,7 +3611,7 @@ dependencies = [
 [[package]]
 name = "rs-matter"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "bitflags 2.13.2",
  "defmt",
@@ -3674,7 +3640,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-bdx"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "defmt",
  "log",
@@ -3688,7 +3654,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-cert"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "defmt",
  "der",
@@ -3705,7 +3671,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-codegen"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "convert_case 0.6.0",
  "miette",
@@ -3724,7 +3690,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-crypto"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "defmt",
  "der",
@@ -3739,7 +3705,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-dm"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "async-channel",
  "bitflags 2.13.2",
@@ -3770,7 +3736,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-dm-clusters"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "bitflags 2.13.2",
  "defmt",
@@ -3785,7 +3751,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-dm-core"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "cfg-if",
  "defmt",
@@ -3802,14 +3768,11 @@ dependencies = [
 [[package]]
 name = "rs-matter-embassy"
 version = "0.1.0"
-source = "git+https://github.com/sysgrok/rs-matter-embassy?rev=165534170a48e86a96a659ba9e5162be1ce0e927#165534170a48e86a96a659ba9e5162be1ce0e927"
+source = "git+https://github.com/sysgrok/rs-matter-embassy?rev=252cc60e7865a474b998e47fa0149af0a6648cd6#252cc60e7865a474b998e47fa0149af0a6648cd6"
 dependencies = [
  "bt-hci 0.10.1",
  "cfg-if",
  "cyw43",
- "edge-nal",
- "edge-nal-embassy",
- "edge-nal-openthread",
  "embassy-net",
  "embassy-nrf",
  "embassy-sync 0.8.0",
@@ -3837,7 +3800,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-im"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "defmt",
  "log",
@@ -3854,7 +3817,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-im-core"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "defmt",
  "log",
@@ -3869,7 +3832,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-macros"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3880,7 +3843,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-node"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "defmt",
  "log",
@@ -3900,7 +3863,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-node-core"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "bitflags 2.13.2",
  "cfg-if",
@@ -3921,7 +3884,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-onboard"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "defmt",
  "log",
@@ -3939,7 +3902,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-pairing"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "defmt",
  "log",
@@ -3953,7 +3916,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-respond"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "defmt",
  "log",
@@ -3969,7 +3932,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-sc"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "defmt",
  "log",
@@ -3989,7 +3952,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-stack"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "async-io",
  "cfg-if",
@@ -4013,7 +3976,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-tlv"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "defmt",
  "log",
@@ -4028,7 +3991,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-transport"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "async-channel",
  "async-io",
@@ -4056,7 +4019,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-utils"
 version = "0.4.1"
-source = "git+https://github.com/project-chip/rs-matter?rev=bf3fe6b94f6428d12611c67fcf698883c269507d#bf3fe6b94f6428d12611c67fcf698883c269507d"
+source = "git+https://github.com/project-chip/rs-matter?rev=b7ddead87ded213bd870dc39a89891ff5f820503#b7ddead87ded213bd870dc39a89891ff5f820503"
 dependencies = [
  "bitflags 2.13.2",
  "critical-section",

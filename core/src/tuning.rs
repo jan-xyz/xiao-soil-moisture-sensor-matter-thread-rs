@@ -39,6 +39,19 @@ pub const SOIL_CAL_DEFAULT_WET_MV: i32 = 900;
 /// closer is a mis-clamped probe, not a calibration.
 pub const SOIL_CAL_MIN_SPAN_MV: i32 = 200;
 
+/// Where the segmented moisture curve bends, as a fraction of the dry-wet mV
+/// span measured from the wet reference, in permille. The bend is derived
+/// from the two captured references, so the calibration flow still captures
+/// only dry and wet - no third point exists. 850 puts it near the dry end,
+/// mirroring the segmented calibration of Szypłowska et al. 2021 (Geoderma
+/// 401, 115288): their breakpoint sits at a permittivity much closer to air
+/// than to water, with the dry side of the curve steeper than the wet side.
+pub const SOIL_CAL_BREAK_FRAC_PERMILLE: i32 = 850;
+/// The moisture percentage the bend maps to. Strictly inside 0-100 with the
+/// fraction strictly inside the span, both segments of the curve slope down
+/// in mV, so the reading can only fall as the soil dries.
+pub const SOIL_CAL_BREAK_PERCENT: u8 = 30;
+
 /// The two references the calibration flow captures, and the hold time of each
 /// half of the flow.
 pub const SOIL_CAL_HOLD: Millis = Millis::from_secs(10);
@@ -165,7 +178,7 @@ pub const SIT_POLL_PERIOD_MS: u32 = 15_000;
 /// board's sleep current is worth more than more sleep. The cluster's 18 h
 /// ceiling would still admit the extreme, and the 1 h cap the spec puts on
 /// an advertised idle interval no longer binds a device that sleeps, because
-/// a LIT advertises no `SII` at all (rs-matter `bf3fe6b`).
+/// a LIT advertises no `SII` at all (rs-matter `b7ddead8`).
 ///
 /// Constant on purpose, even though the reading could set it. The reported
 /// percent scale decays roughly linearly - the trip from 100% to 90% takes

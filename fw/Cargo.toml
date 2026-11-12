@@ -34,7 +34,6 @@ esp-radio = { version = "1.0.0-beta.1", features = ["ble", "log-04", "unstable"]
 esp-bootloader-esp-idf = { version = "0.6", features = ["log-04", "embedded-storage"] }
 esp-metadata-generated = "0.5"
 
-# Pinned to `sysgrok/rs-matter-embassy`'s `master`, where the ICD work and the
 # Pinned to `sysgrok/rs-matter-embassy`'s `master`, where the ICD work, the
 # KV cache (PR 91: the KV store tracks its keys in RAM, so the fabric table's
 # 254 missing-index probes per boot cost no flash reads) and the move of
@@ -42,7 +41,7 @@ esp-metadata-generated = "0.5"
 # Thread SED driver there follows the ICD power mode state machine that
 # `rs-matter` itself owns (`EmbassyThread::with_icd`) instead of an app-driven
 # poll-period handle.
-rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev = "165534170a48e86a96a659ba9e5162be1ce0e927", default-features = false, features = [
+rs-matter-embassy = { git = "https://github.com/sysgrok/rs-matter-embassy", rev = "252cc60e7865a474b998e47fa0149af0a6648cd6", default-features = false, features = [
   "esp",
   "log",
 ] }

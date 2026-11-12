@@ -56,7 +56,7 @@ use rs_matter_embassy::{
                 icd_mgmt::{ClusterHandler as _, IcdModeConfig, LitIcd, LitIcdMgmtHandler},
             },
             devices::{
-                test::{DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET},
+                test::{DAC_PRIVKEY, TEST_BASIC_COMM, TEST_DEV_ATT, TEST_DEV_DET},
                 DEV_TYPE_ROOT_NODE,
             },
             endpoints::ROOT_ENDPOINT_ID,
@@ -67,7 +67,8 @@ use rs_matter_embassy::{
     },
     persist::SeqMapKvBlobStore,
     rand::{rand_core::SeedableRng, ChaCha12Rng},
-    wireless::{esp::EspThreadRadio, EmbassyThread, EmbassyThreadMatterStack},
+    stack::{wireless::BTP_BUMP_SIZE, MatterStack},
+    wireless::{esp::EspThreadRadio, EmbassyThread, EmbassyThreadNetwork},
 };
 use soil_sensor_core::{
     app::{run_boot, run_wake, Boot},
@@ -104,9 +105,13 @@ macro_rules! mk_static {
     }};
 }
 
-/// See the reference example for the rationale on this sizing; retuned upward
-/// because this device hosts two hand-written cluster handlers and the boot loop.
-const BUMP_SIZE: usize = 24000;
+/// Sized like the reference `trv_battery_thread` example (23000 +
+/// `BTP_BUMP_SIZE`, the closest analog: an ICD device over Thread coex) with
+/// margin for this device's two hand-written cluster handlers and the boot
+/// loop. The rs-matter-stack bump runs the coex/BTP and responder futures;
+/// bump.rs panics "Out of bump memory" when this is too small - seen at 24000
+/// after the rs-matter bump to b7ddead8.
+const BUMP_SIZE: usize = 32000 + BTP_BUMP_SIZE;
 
 /// Heap for Thread+BLE plus the boot loop's own allocations.
 const HEAP_SIZE: usize = 110 * 1024;
@@ -483,16 +488,16 @@ async fn main(s: Spawner) {
 
     // Allocate the protocol stack statically - mandatory for the wireless stack
     // variation, and it avoids blowing the program stack.
-    let stack = mk_static!(EmbassyThreadMatterStack::<BUMP_SIZE, ()>).init_with(
-        EmbassyThreadMatterStack::init(
+    let stack =
+        mk_static!(MatterStack::<BUMP_SIZE, EmbassyThreadNetwork>).init_with(MatterStack::init(
             mk_static!(BasicInfoConfig).init_with(basic_info(serial_no_from_efuse())),
             BasicCommData {
-                password: TEST_DEV_COMM.password,
+                password: TEST_BASIC_COMM.password,
                 discriminator,
-            },
+            }
+            .into(),
             &TEST_DEV_ATT,
-        ),
-    );
+        ));
 
     // Before the stack's event loop runs: the BootReason event is emitted once
     // at its start, and reads what is set here. That happens inside the matter
@@ -527,7 +532,7 @@ async fn main(s: Spawner) {
     let handler = EmptyHandler
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EmbassyThreadMatterStack::<0, ()>::root_handler(
+            Async(MatterStack::<0, EmbassyThreadNetwork>::root_handler(
                 stack.matter(),
                 &(),
                 &mut weak_rand,
@@ -633,7 +638,7 @@ async fn main(s: Spawner) {
 
         let kv = stack.matter().kv(kv);
 
-        let matter = pin!(stack.run_coex(
+        let matter = pin!(stack.run_thread(
             EmbassyThread::new(
                 EspThreadRadio::new(peripherals.IEEE802154.reborrow(), peripherals.BT.reborrow(),)
                     .with_rx_queue_size(board::THREAD_RX_QUEUE_SIZE),

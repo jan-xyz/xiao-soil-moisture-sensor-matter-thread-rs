@@ -149,8 +149,9 @@ The `esp-hal` one is the last real fork: upstream `openthread`'s ESP radio still
 carries a `TODO: Upstream in esp-radio a stop_receive counterpart to the existing
 start_receive`, so the sleep path depends on it. Everything else is an unreleased
 commit on a project's own repository. (`rs-matter-stack` is no longer a pin at
-all: upstream absorbed it, and the archived `sysgrok` repository only tracks a
-pre-micro-crate `rs-matter`.)
+all: upstream absorbed it. The two rs-matter pins move together -
+`sysgrok/rs-matter-embassy`'s `master` tracks `project-chip/rs-matter`'s
+`main`, so bumping one without the other does not compile.)
 
 Each is pinned by revision rather than by branch, so an upstream push cannot
 change what this firmware builds. Moving a pin means rebuilding and re-flashing;

@@ -33,8 +33,9 @@ the C++ firmware, and it deliberately does not have every feature of it. See
 
 ## Features
 
-- Matter over Thread, BLE-concurrent commissioning (`EmbassyThreadMatterStack`,
-  same shape as `rs-matter-embassy`'s `light_thread_coex` example).
+- Matter over Thread, BLE-concurrent commissioning (`MatterStack` over
+  `EmbassyThreadNetwork`, same shape as `rs-matter-embassy`'s
+  `light_thread_coex` example).
 - `SoilMeasurement` cluster reporting moisture % (hand-written handler - see
   below).
 - Battery-shaped `PowerSource` cluster reporting battery %, voltage and an
@@ -82,6 +83,12 @@ the C++ firmware, and it deliberately does not have every feature of it. See
 A calibration is rejected when the dry and wet readings are too close
 together, or when the new references cannot be stored. The counts and periods
 are in `core/src/tuning.rs`.
+
+Only those two references are captured; the reported percentage is a
+piecewise-linear curve whose mid bend is derived from them (near the dry end,
+steeper on the dry side, monotone - the reading can only fall as the soil
+dries). The bend's position and height are `SOIL_CAL_BREAK_FRAC_PERMILLE` and
+`SOIL_CAL_BREAK_PERCENT` in `core/src/tuning.rs`.
 
 ### Why hand-written cluster handlers?
 

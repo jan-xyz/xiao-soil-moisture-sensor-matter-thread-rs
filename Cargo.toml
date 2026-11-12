@@ -49,9 +49,11 @@ opt-level = "s"
 # the MRP backoff accounting for an ICD sender's own polling interval (#638) -
 # is past the published releases.
 # `docs/building.md` has the whole pin set and why each one exists.
-# `rs-matter-stack` is gone from the pin set: upstream absorbed it (#636), and
-# the archived sysgrok repository's last revision only tracks a pre-`#634` main.
-rs-matter = { git = "https://github.com/project-chip/rs-matter", rev = "bf3fe6b94f6428d12611c67fcf698883c269507d" }
+# `rs-matter-stack` is gone from the pin set: upstream absorbed it (#636). The
+# two pins move together: `sysgrok/rs-matter-embassy`'s `master` tracks
+# `project-chip/rs-matter`'s `main` (its HEAD commit is literally "Update to
+# latest rs-matter"), so bumping one without the other does not compile.
+rs-matter = { git = "https://github.com/project-chip/rs-matter", rev = "b7ddead87ded213bd870dc39a89891ff5f820503" }
 
 # The CSL API and the radio sleep path the SED driver needs, unreleased.
 openthread = { git = "https://github.com/esp-rs/openthread", rev = "705c5576ccfd7b417cfa4b23912a13b1b99e01f2" }
